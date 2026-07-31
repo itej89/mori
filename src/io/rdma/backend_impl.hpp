@@ -197,6 +197,13 @@ class NotifManager {
 
   std::unordered_map<TransferStatus*, int> localNotif;
 
+  std::unordered_map<uint16_t, TransferUniqueId> immSeqToId_;
+  std::atomic<uint16_t> immNextSeq_{0};
+
+ public:
+  uint16_t AllocImmSeq(TransferUniqueId id);
+  TransferUniqueId ResolveImmSeq(uint16_t seq);
+
   // Accessed only by the single NotifManager poll loop thread to rate-limit
   // repeated summaries for the same consecutive flush episode.
   uint64_t flushSummaryStreak_{0};
@@ -266,7 +273,8 @@ class RdmaBackendSession : public BackendSession {
   RdmaBackendSession(const RdmaBackendConfig& config,
                      std::vector<application::RdmaMemoryRegion> localMrPerEp,
                      std::vector<application::RdmaMemoryRegion> remoteMrPerEp, const EpPairVec& eps,
-                     Executor* executor, MemoryLocationType localLoc = MemoryLocationType::CPU);
+                     Executor* executor, MemoryLocationType localLoc = MemoryLocationType::CPU,
+                     NotifManager* notifMgr = nullptr);
   ~RdmaBackendSession() = default;
 
   void ReadWrite(size_t localOffset, size_t remoteOffset, size_t size, TransferStatus* status,
@@ -285,6 +293,7 @@ class RdmaBackendSession : public BackendSession {
   EpPairVec eps{};
   Executor* executor{nullptr};
   MemoryLocationType localLoc_{MemoryLocationType::CPU};
+  NotifManager* notifMgr_{nullptr};
   std::shared_ptr<std::atomic<bool>> warnedChunkedWorkerFallback_{
       std::make_shared<std::atomic<bool>>(false)};
 };

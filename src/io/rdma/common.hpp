@@ -117,6 +117,18 @@ struct NotifMessage {
   int totalNum{-1};
 };
 
+inline uint32_t PackWriteImmediate(uint16_t seq, int qpIndex, int totalNum) {
+  return (static_cast<uint32_t>(seq) << 16) |
+         (static_cast<uint32_t>(qpIndex & 0xFF) << 8) |
+         static_cast<uint32_t>(totalNum & 0xFF);
+}
+
+inline void UnpackWriteImmediate(uint32_t imm, uint16_t& seq, int& qpIndex, int& totalNum) {
+  seq = static_cast<uint16_t>(imm >> 16);
+  qpIndex = static_cast<int>((imm >> 8) & 0xFF);
+  totalNum = static_cast<int>(imm & 0xFF);
+}
+
 // wr_id namespace:
 //   Zone A: notification RECV indices [0, notifPerQp)
 //   Zone B: ledger record IDs [notifPerQp, 2^63)
@@ -279,6 +291,8 @@ struct RdmaTransferControl {
   bool creditByWrCount{false};
   bool ownsTotalBatchSize{true};
   bool disableMerge{false};
+  bool useWriteImm{false};
+  std::vector<uint32_t> perEpImmData;
 };
 
 RdmaOpRet RdmaBatchReadWrite(const EpPairVec& eps,
