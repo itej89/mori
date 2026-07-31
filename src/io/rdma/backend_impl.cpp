@@ -109,9 +109,6 @@ std::optional<int> ParsePostBatchSize(const char* raw) {
 
 int ResolveRequestedNics(const RdmaBackendConfig& config, const TopoKey& local,
                          const TopoKey& remote) {
-  if (local.loc == MemoryLocationType::GPU || remote.loc == MemoryLocationType::GPU) {
-    return 1;
-  }
   return std::max(1, config.numNicsPerTransfer);
 }
 

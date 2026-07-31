@@ -230,6 +230,12 @@ def parse_args():
         help="Number of QPs for a single transfer (default: 4)",
     )
     parser.add_argument(
+        "--num-nics-per-transfer",
+        type=int,
+        default=1,
+        help="Number of NICs to stripe each transfer across (default: 1)",
+    )
+    parser.add_argument(
         "--num-worker-threads",
         type=int,
         default=1,
@@ -347,6 +353,7 @@ class MoriIoBenchmark:
         num_target_dev: int = 1,
         target_dev_offset: int = 0,
         num_qp_per_transfer: int = 4,
+        num_nics_per_transfer: int = 1,
         num_worker_threads: int = 1,
         poll_cq_mode: str = "polling",
         max_send_wr: int = 0,
@@ -386,6 +393,7 @@ class MoriIoBenchmark:
         self.num_target_dev = num_target_dev
         self.target_dev_offset = target_dev_offset
         self.num_qp_per_transfer = num_qp_per_transfer
+        self.num_nics_per_transfer = num_nics_per_transfer
         self.num_worker_threads = num_worker_threads
         self.poll_cq_mode = (
             PollCqMode.POLLING if poll_cq_mode == "polling" else PollCqMode.EVENT
@@ -788,6 +796,7 @@ class MoriIoBenchmark:
             enable_transfer_chunking=self.enable_chunking,
             chunk_bytes=self.chunk_bytes,
             max_chunks_per_transfer=self.max_chunks,
+            num_nics_per_transfer=self.num_nics_per_transfer,
         )
         if self.max_send_wr > 0:
             config.max_send_wr = self.max_send_wr
@@ -1285,6 +1294,7 @@ def benchmark_engine(local_rank, node_rank, args):
         num_target_dev=args.num_target_dev,
         target_dev_offset=args.target_dev_offset,
         num_qp_per_transfer=args.num_qp_per_transfer,
+        num_nics_per_transfer=args.num_nics_per_transfer,
         num_worker_threads=args.num_worker_threads,
         poll_cq_mode=args.poll_cq_mode,
         max_send_wr=args.max_send_wr,
