@@ -395,7 +395,6 @@ void Context::BuildAndConnectInitialEndpoints() {
   // allRdmaDeviceContexts has 1 entry and behaviour is unchanged.
   const int numRailContexts = static_cast<int>(allRdmaDeviceContexts.size());
   const int myLocalGpu = LocalRankInNode();
-  fprintf(stderr, "[MoRI-RAIL] rank=%d myLocalGpu=%d numRailContexts=%d\n", LocalRank(), myLocalGpu, numRailContexts);
   rdmaEps.reserve(static_cast<size_t>(WorldSize()) * numQpPerPe);
   for (int i = 0; i < WorldSize(); i++) {
     if (transportTypes[i] == TransportType::RDMA) {
@@ -403,7 +402,6 @@ void Context::BuildAndConnectInitialEndpoints() {
         int peerLocalGpu = i % numRailContexts;
         int agreedRail = std::max(myLocalGpu, peerLocalGpu) % numRailContexts;
         if (qp == 0) {
-          fprintf(stderr, "[MoRI-RAIL] rank=%d → peer=%d peerLocalGpu=%d agreedRail=ionic_%d\n", LocalRank(), i, peerLocalGpu, agreedRail);
         }
         RdmaDeviceContext* ctx = (numRailContexts > 1)
             ? allRdmaDeviceContexts[agreedRail].get()
