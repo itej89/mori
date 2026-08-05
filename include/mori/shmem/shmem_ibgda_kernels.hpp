@@ -269,16 +269,20 @@ inline __device__ void ShmemQuietThreadKernelSerialImpl(int pe, int qpId) {
 inline __device__ void ShmemQuietThreadKernelPsdImpl(int pe, int qpId) {
   GpuStates* globalGpuStates = GetGlobalGpuStatesPtr();
 
-  // Proxy path: wait only for ops posted since the last quiet.
+  // Proxy path: quiet only the ring for this (pe, qpId)'s NIC.
   if (globalGpuStates->useProxy && globalGpuStates->numProxyRings > 0) {
-    for (int n = 0; n < globalGpuStates->numProxyRings; n++) {
-      volatile core::ProxyRing* ring = globalGpuStates->proxyRings[n];
-      if (!ring) continue;
+    int epIndex = pe * globalGpuStates->numQpPerPe + (qpId % globalGpuStates->numQpPerPe);
+    int peerLocal = pe % globalGpuStates->numNics;
+    int nicIdx = (globalGpuStates->localGpuIdx > peerLocal
+                  ? globalGpuStates->localGpuIdx : peerLocal) % globalGpuStates->numNics;
+    volatile core::ProxyRing* ring = globalGpuStates->proxyRings[nicIdx];
+    if (ring) {
       uint32_t head = ring->gpu_head;
-      uint32_t lastQuiet = globalGpuStates->proxyQuietHead[n];
-      if (head == lastQuiet) continue;
-      core::ProxyQuiet(ring, lastQuiet, head - lastQuiet);
-      globalGpuStates->proxyQuietHead[n] = head;
+      uint32_t lastQuiet = globalGpuStates->proxyQuietHead[nicIdx];
+      if (head != lastQuiet) {
+        core::ProxyQuiet(ring, lastQuiet, head - lastQuiet);
+        globalGpuStates->proxyQuietHead[nicIdx] = head;
+      }
     }
     return;
   }
@@ -469,6 +473,14 @@ inline __device__ void ShmemQuietThreadKernel<application::TransportType::RDMA>(
   int rank = globalGpuStates->rank;
   if (pe == rank) return;
   if (globalGpuStates->transportTypes[pe] != application::TransportType::RDMA) return;
+  // Proxy path: all QPs for a given pe share the same NIC (rail isolation),
+  // so one quiet on that NIC's ring covers all QPs. No need to loop numQpPerPe.
+  if constexpr (DISPATCH_PSD == 1) {
+    if (globalGpuStates->useProxy && globalGpuStates->numProxyRings > 0) {
+      ShmemQuietThreadKernelImpl<core::ProviderType::PSD, true>(pe, 0);
+      return;
+    }
+  }
   for (int qpId = 0; qpId < globalGpuStates->numQpPerPe; qpId++) {
     if constexpr (DISPATCH_BNXT == 1) {
       ShmemQuietThreadKernelImpl<core::ProviderType::BNXT, true>(pe, qpId);
