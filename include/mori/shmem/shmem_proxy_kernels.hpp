@@ -15,7 +15,7 @@ inline __device__ volatile core::ProxyRing* ProxyRingForEp(
   int pe = epIndex / ps->numQpPerPe;
   int peerLocal = pe % ps->numNics;
   int nicIdx = (ps->localGpuIdx > peerLocal ? ps->localGpuIdx : peerLocal) % ps->numNics;
-  return ps->proxyRings[nicIdx];
+  return ps->rings[nicIdx];
 }
 
 // Proxy variant of ShmemPutMemNbiThreadKernelImpl — RDMA WRITE via proxy ring
