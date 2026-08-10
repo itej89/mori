@@ -154,8 +154,14 @@ struct RemoteAddrInfo {
 
 #if !defined(__HIPCC__) && !defined(__CUDACC__)
 
+}  // namespace shmem
+}  // namespace mori
+
 #include "mori/core/transport/rdma/proxy/proxy_thread.hpp"
 #include "mori/shmem/shmem_proxy_state.hpp"
+
+namespace mori {
+namespace shmem {
 
 enum ShmemStatesStatus {
   New = 0,

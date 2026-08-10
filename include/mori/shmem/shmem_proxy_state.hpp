@@ -11,8 +11,8 @@ namespace shmem {
 // Copied to its own device symbol (globalProxyState) only when MORI_EP_OVER_RDMA=1.
 struct ProxyGpuState {
   bool active{false};
-  core::ProxyRing* rings[core::PROXY_MAX_NICS]{};
-  uint32_t quietHead[core::PROXY_MAX_NICS]{};
+  ::mori::core::ProxyRing* rings[::mori::core::PROXY_MAX_NICS]{};
+  uint32_t quietHead[::mori::core::PROXY_MAX_NICS]{};
   int numRings{0};
   int numNics{0};
   int localGpuIdx{0};
