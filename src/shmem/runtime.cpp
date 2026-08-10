@@ -111,6 +111,26 @@ void CopyGpuStatesToDevice(ShmemStates* states) {
 
   MORI_SHMEM_TRACE("Successfully copied GpuStates to device (rank={}, worldSize={})",
                    gpuStates->rank, gpuStates->worldSize);
+
+  // Copy ProxyGpuState if EP-over-RDMA proxy is active
+  if (states->proxyGpuState.active) {
+    const ProxyGpuState* proxyState = &states->proxyGpuState;
+    if (ms.module != nullptr) {
+      ProxyGpuState* deviceProxyPtr = nullptr;
+      size_t symbolSize = 0;
+      hipError_t err = hipModuleGetGlobal(reinterpret_cast<hipDeviceptr_t*>(&deviceProxyPtr),
+                                          &symbolSize, ms.module,
+                                          "_ZN4mori5shmem16globalProxyStateE");
+      if (err == hipSuccess && deviceProxyPtr != nullptr) {
+        HIP_RUNTIME_CHECK(
+            hipMemcpy(deviceProxyPtr, proxyState, sizeof(ProxyGpuState), hipMemcpyHostToDevice));
+        MORI_SHMEM_TRACE("Copied ProxyGpuState to JIT module ({:p})", (void*)deviceProxyPtr);
+      }
+    }
+    for (auto& provider : GpuStatesProviders()) {
+      (void)provider;  // ProxyGpuState only needed in JIT module for now
+    }
+  }
 }
 
 void FinalizeRuntime(ShmemStates* states) {
