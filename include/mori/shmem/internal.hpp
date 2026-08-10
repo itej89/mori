@@ -154,11 +154,8 @@ struct RemoteAddrInfo {
 
 #if !defined(__HIPCC__) && !defined(__CUDACC__)
 
+#include "mori/core/transport/rdma/proxy/proxy_thread.hpp"
 #include "mori/shmem/shmem_proxy_state.hpp"
-
-}  // namespace shmem
-namespace core { class ProxyThread; }
-namespace shmem {
 
 enum ShmemStatesStatus {
   New = 0,
@@ -185,8 +182,8 @@ struct ShmemStates {
   MemoryStates* memoryStates{nullptr};
   ModuleStates moduleStates;  // JIT module state for this GPU
   GpuStates gpuStates;        // host-side copy of device GpuStates for this GPU
-  ProxyGpuState proxyGpuState;                                     // host-side proxy state (MORI_EP_OVER_RDMA)
-  std::vector<std::unique_ptr<core::ProxyThread>> proxyThreads;    // per-NIC CPU proxy threads
+  ProxyGpuState proxyGpuState;
+  std::vector<std::unique_ptr<::mori::core::ProxyThread>> proxyThreads;
 
   // Asserts that ShmemInit has been called and the slot is currently usable.
   // Used by APIs that touch GPU state (allocation, barrier, module init)
