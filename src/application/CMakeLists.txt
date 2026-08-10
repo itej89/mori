@@ -54,6 +54,7 @@ list(
   transport/rdma/providers/ibverbs/ibverbs.cpp
   transport/tcp/tcp.cpp
   transport/sdma/anvil.cpp
+  transport/rdma/proxy/proxy_thread.cpp
   memory/symmetric_memory.cpp
   memory/va_manager.cpp
   memory/memory_region.cpp
