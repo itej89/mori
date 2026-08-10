@@ -61,6 +61,7 @@ namespace shmem {
 
 #if !defined(MORI_SHMEM_NO_STATIC_INIT) || defined(MORI_SHMEM_ENABLE_WEAK_GLOBAL_GPU_STATES)
 __device__ __attribute__((visibility("default"), weak)) GpuStates globalGpuStates;
+__device__ __attribute__((visibility("default"), weak)) ProxyGpuState globalProxyState;
 
 namespace _static_init {
 
