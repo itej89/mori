@@ -181,6 +181,20 @@ int ShmemModuleInit(void* hipModule) {
   HIP_RUNTIME_CHECK(hipMemcpy(moduleGlobalGpuStatesAddr, &states->gpuStates, sizeof(GpuStates),
                               hipMemcpyHostToDevice));
 
+  if (states->proxyGpuState.active) {
+    ProxyGpuState* moduleProxyAddr = nullptr;
+    size_t proxySymSize = 0;
+    hipError_t perr = hipModuleGetGlobal(reinterpret_cast<hipDeviceptr_t*>(&moduleProxyAddr),
+                                         &proxySymSize, module,
+                                         "_ZN4mori5shmem16globalProxyStateE");
+    if (perr == hipSuccess && moduleProxyAddr != nullptr) {
+      HIP_RUNTIME_CHECK(hipMemcpy(moduleProxyAddr, &states->proxyGpuState,
+                                  sizeof(ProxyGpuState), hipMemcpyHostToDevice));
+      fprintf(stderr, "[MORI-PROXY] ShmemModuleInit: copied ProxyGpuState to module %p\n",
+              (void*)moduleProxyAddr);
+    }
+  }
+
   MORI_SHMEM_TRACE("Successfully initialized globalGpuStates in module (rank={}, worldSize={})",
                    states->gpuStates.rank, states->gpuStates.worldSize);
 
