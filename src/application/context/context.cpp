@@ -174,13 +174,6 @@ void Context::CollectHostNames() {
 // / Context::IsP2PDisabled() instead of getenv anywhere outside the
 // constructor.
 
-int Context::SameHostPeersBefore(int rank) const {
-  int n = 0;
-  for (int j = 0; j < rank; j++)
-    if (peerInfos[j].sameHost) n++;
-  return n;
-}
-
 void Context::InitializeTopologyAndTransports() {
   // Find my rank in node
   for (int i = 0; i <= LocalRank(); i++) {
@@ -249,19 +242,15 @@ void Context::InitializeTopologyAndTransports() {
   // On rail-isolated fabrics (e.g. Pensando AINIC), QP index qp must use
   // allRdmaDeviceContexts[qp % N] so each QP's advertised GID is that
   // rail's own GID. On non-rail-isolated fabrics all N entries are equivalent.
-  // Gate on activeDevicePortList.size() > 1 to avoid creating extra mlx5
-  // contexts on single-NIC CX7 setups.
   allRdmaDeviceContexts.clear();
-  if (activeDevicePortList.size() > 1) {
-    for (const auto& dp : activeDevicePortList) {
-      RdmaDeviceContext* ctx = dp.first->CreateRdmaDeviceContext();
-      if (ctx != nullptr) {
-        allRdmaDeviceContexts.emplace_back(ctx);
-      }
+  for (const auto& dp : activeDevicePortList) {
+    RdmaDeviceContext* ctx = dp.first->CreateRdmaDeviceContext();
+    if (ctx != nullptr) {
+      allRdmaDeviceContexts.emplace_back(ctx);
     }
   }
   if (allRdmaDeviceContexts.empty() && rdmaDeviceContext) {
-    // Fallback: single NIC or no devices in list but primary context exists.
+    // Fallback: no devices in list but primary context exists — include it.
     allRdmaDeviceContexts.emplace_back(
         rdmaDeviceContext->GetRdmaDevice()->CreateRdmaDeviceContext());
   }
@@ -366,7 +355,7 @@ TransportType Context::DefaultPolicyResolve(const PeerCapabilities& cap, bool is
 /*  SDMA queues materialized but did not go through BuildInitialEndpoints.  */
 /* ------------------------------------------------------------------------ */
 
-void Context::EnsureSdmaTransport(int requestedChannels) {
+void Context::EnsureSdmaTransport() {
   if (sdmaSetupDone) return;
 
   // anvil global init: do it lazily here rather than at Context construction
@@ -375,26 +364,17 @@ void Context::EnsureSdmaTransport(int requestedChannels) {
   // SDMA engines — see PeerCapabilities doc for context.
   anvil::anvil.init();
 
-  // Explicit request (CCO's reqs.sdmaQueueCount) wins; else env default.
-  int sdmaNumChannels = requestedChannels > 0 ? requestedChannels : anvil::GetSdmaNumChannels();
-  if (sdmaNumChannels > anvil::kMaxSdmaChannelsPerPair) {
-    MORI_APP_WARN("SDMA channels {} exceeds hardware max, clamping to {}", sdmaNumChannels,
-                  anvil::kMaxSdmaChannelsPerPair);
-    sdmaNumChannels = anvil::kMaxSdmaChannelsPerPair;
-  }
+  // GetSdmaNumChannels is a configuration knob (env or default 2), not a
+  // hardware probe. The real check is whether the loop body below succeeds
+  // for every canSDMA peer.
+  int sdmaNumChannels = anvil::GetSdmaNumChannels();
   MORI_APP_INFO("SDMA num channels per GPU pair: {}", sdmaNumChannels);
 
-  // Within-node HIP device id = count of same-host peers before the rank
-  // (not globalRank % 8, which faults under sliced HIP_VISIBLE_DEVICES).
-  int localDevId = SameHostPeersBefore(LocalRank());
   for (int i = 0; i < WorldSize(); i++) {
     if (!peerCaps[i].canSDMA) continue;
-    // Peer within-node device id: count of same-host peers before it.
-    int peerDevId = SameHostPeersBefore(i);
-    if (i != LocalRank()) anvil::EnablePeerAccess(localDevId, peerDevId);
-    anvil::anvil.connect(localDevId, peerDevId, sdmaNumChannels);
+    if (i != LocalRank()) anvil::EnablePeerAccess(LocalRank() % 8, i % 8);
+    anvil::anvil.connect(LocalRank() % 8, i % 8, sdmaNumChannels);
   }
-  sdmaChannels_ = sdmaNumChannels;
   sdmaSetupDone = true;
 }
 
@@ -413,7 +393,7 @@ void Context::BuildAndConnectInitialEndpoints() {
   // any NIC can DMA any local GPU's memory, so the "wrong" GPU just pays a
   // small XGMI hop. On non-rail-isolated fabrics (e.g. CX7)
   // allRdmaDeviceContexts has 1 entry and behaviour is unchanged.
-  const int numRailContexts = std::max(1, static_cast<int>(allRdmaDeviceContexts.size()));
+  const int numRailContexts = static_cast<int>(allRdmaDeviceContexts.size());
   const int myLocalGpu = LocalRankInNode();
   rdmaEps.reserve(static_cast<size_t>(WorldSize()) * numQpPerPe);
   for (int i = 0; i < WorldSize(); i++) {
@@ -421,6 +401,8 @@ void Context::BuildAndConnectInitialEndpoints() {
       for (int qp = 0; qp < numQpPerPe; qp++) {
         int peerLocalGpu = i % numRailContexts;
         int agreedRail = std::max(myLocalGpu, peerLocalGpu) % numRailContexts;
+        if (qp == 0) {
+        }
         RdmaDeviceContext* ctx = (numRailContexts > 1)
             ? allRdmaDeviceContexts[agreedRail].get()
             : rdmaDeviceContext.get();
@@ -497,7 +479,7 @@ std::vector<RdmaEndpoint> Context::CreateAdditionalEndpoints(int qpPerPe,
       continue;
     }
     for (int qp = 0; qp < qpPerPe; qp++) {
-      const int nCtx = std::max(1, static_cast<int>(allRdmaDeviceContexts.size()));
+      const int nCtx = static_cast<int>(allRdmaDeviceContexts.size());
       int peerLocalGpu = i % nCtx;
       int agreedRail = std::max(LocalRankInNode(), peerLocalGpu) % nCtx;
       RdmaDeviceContext* ctx = (nCtx > 1)
@@ -526,7 +508,7 @@ void Context::ConnectAdditionalEndpoints(std::vector<RdmaEndpoint>& endpoints, i
     if (!ShouldCreateQpForPeer(peer, LocalRank(), peerCaps, peerMask)) continue;
     for (int qp = 0; qp < qpPerPe; qp++) {
       int idx = peer * qpPerPe + qp;
-      const int nCtx = std::max(1, static_cast<int>(allRdmaDeviceContexts.size()));
+      const int nCtx = static_cast<int>(allRdmaDeviceContexts.size());
       int peerLocalGpu = peer % nCtx;
       int agreedRail = std::max(LocalRankInNode(), peerLocalGpu) % nCtx;
       RdmaDeviceContext* ctx = (nCtx > 1)

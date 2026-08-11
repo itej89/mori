@@ -55,13 +55,7 @@ class SymmMemManager {
   SymmMemObjPtr Malloc(size_t size);
   SymmMemObjPtr ExtMallocWithFlags(size_t size, unsigned int flags);
   void Free(void* localPtr);
-  // ``rdmaRegister=false`` skips the ibv_reg_mr step for buffers only ever
-  // accessed intra-node via P2P/SDMA (XGMI) and never targeted by RDMA. Avoids
-  // the ionic single-MR limit for large SDMA-only transits (the hierarchical
-  // AllGather's node-block, up to _max_bytes/GiB). The collective rkey Allgather
-  // still runs (rkey=0) so init stays in lockstep across PEs.
-  SymmMemObjPtr RegisterSymmMemObj(void* localPtr, size_t size, bool heap_begin = false,
-                                   bool rdmaRegister = true);
+  SymmMemObjPtr RegisterSymmMemObj(void* localPtr, size_t size, bool heap_begin = false);
   void DeregisterSymmMemObj(void* localPtr);
 
   // Static Heap Operations
