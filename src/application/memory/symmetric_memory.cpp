@@ -201,12 +201,41 @@ SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bo
   // node-block. The rkey stays 0 and the Allgather below still runs, so the
   // collective register stays in lockstep.
   if (rdmaDeviceContext && anyRdmaPeer && rdmaRegister) {
-    application::RdmaMemoryRegion mr =
-        rdmaDeviceContext->RegisterRdmaMemoryRegionAuto(localPtr, size);
-    cpuMemObj->lkey = mr.lkey;
-    cpuMemObj->peerRkeys[rank] = mr.rkey;
+    if (heap_begin || heapRkeys_.empty()) {
+      application::RdmaMemoryRegion mr =
+          rdmaDeviceContext->RegisterRdmaMemoryRegionAuto(localPtr, size);
+      cpuMemObj->lkey = mr.lkey;
+      cpuMemObj->peerRkeys[rank] = mr.rkey;
+      if (heap_begin) {
+        heapLkey_ = mr.lkey;
+        heapRkeys_.resize(worldSize);
+      }
+    } else {
+      cpuMemObj->lkey = heapLkey_;
+      cpuMemObj->peerRkeys[rank] = heapRkeys_[rank];
+    }
   }
   bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
+  if (heap_begin && rdmaDeviceContext && anyRdmaPeer && rdmaRegister) {
+    heapRkeys_.assign(cpuMemObj->peerRkeys, cpuMemObj->peerRkeys + worldSize);
+  }
+
+  const auto& allCtxs = context.GetAllRdmaDeviceContexts();
+  int numNics = static_cast<int>(allCtxs.size());
+  if (numNics > 1 && anyRdmaPeer && heap_begin && rdmaRegister) {
+    perNicLkeys.resize(numNics, 0);
+    perNicPeerRkeys.resize(numNics);
+    for (int n = 0; n < numNics; n++) {
+      bootNet.Barrier();
+      perNicPeerRkeys[n].resize(worldSize, 0);
+      if (allCtxs[n]) {
+        auto mr = allCtxs[n]->RegisterRdmaMemoryRegionAuto(localPtr, size);
+        perNicLkeys[n] = mr.lkey;
+        perNicPeerRkeys[n][rank] = mr.rkey;
+      }
+      bootNet.Allgather(&perNicPeerRkeys[n][rank], perNicPeerRkeys[n].data(), sizeof(uint32_t));
+    }
+  }
 
   // Copy memory object to GPU memory, we need to access it from GPU directly
   SymmMemObj* gpuMemObj;
