@@ -55,7 +55,8 @@ class SymmMemManager {
   SymmMemObjPtr Malloc(size_t size);
   SymmMemObjPtr ExtMallocWithFlags(size_t size, unsigned int flags);
   void Free(void* localPtr);
-  SymmMemObjPtr RegisterSymmMemObj(void* localPtr, size_t size, bool heap_begin = false);
+  SymmMemObjPtr RegisterSymmMemObj(void* localPtr, size_t size, bool heap_begin = false,
+                                   bool rdmaRegister = true);
   void DeregisterSymmMemObj(void* localPtr);
 
   // Static Heap Operations

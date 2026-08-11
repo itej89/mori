@@ -106,7 +106,8 @@ void SymmMemManager::Free(void* localPtr) {
 /*                                    SymmMemObj Registration                                    */
 /* ---------------------------------------------------------------------------------------------- */
 
-SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bool heap_begin) {
+SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bool heap_begin,
+                                                 bool rdmaRegister) {
   int worldSize = bootNet.GetWorldSize();
   int rank = bootNet.GetLocalRank();
 
@@ -199,7 +200,7 @@ SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bo
       break;
     }
   }
-  if (rdmaDeviceContext && anyRdmaPeer) {
+  if (rdmaDeviceContext && anyRdmaPeer && rdmaRegister) {
     if (heap_begin) {
       // Heap: register MR and exchange rkeys across all PEs
       application::RdmaMemoryRegion mr =
