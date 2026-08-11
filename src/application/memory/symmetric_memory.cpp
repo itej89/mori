@@ -108,6 +108,7 @@ void SymmMemManager::Free(void* localPtr) {
 
 SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bool heap_begin,
                                                  bool rdmaRegister) {
+  fprintf(stderr, "[SYMMEM] RegisterSymmMemObj rank=%d heap=%d rdmaReg=%d size=%zu\n", bootNet.GetLocalRank(), (int)heap_begin, (int)rdmaRegister, size);
   int worldSize = bootNet.GetWorldSize();
   int rank = bootNet.GetLocalRank();
 
