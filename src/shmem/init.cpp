@@ -775,6 +775,7 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
       }
     }
     MORI_SHMEM_INFO("Proxy: {} threads started for {} NICs", states->proxyThreads.size(), numNics);
+    fprintf(stderr, "[PROXY-THREADS] %zu threads for %d NICs\n", states->proxyThreads.size(), numNics);
     CopyGpuStatesToDevice(states);
   }
 
