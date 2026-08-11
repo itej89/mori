@@ -55,6 +55,11 @@ class SymmMemManager {
   SymmMemObjPtr Malloc(size_t size);
   SymmMemObjPtr ExtMallocWithFlags(size_t size, unsigned int flags);
   void Free(void* localPtr);
+  // ``rdmaRegister=false`` skips the ibv_reg_mr step for buffers only ever
+  // accessed intra-node via P2P/SDMA (XGMI) and never targeted by RDMA. Avoids
+  // the ionic single-MR limit for large SDMA-only transits (the hierarchical
+  // AllGather's node-block, up to _max_bytes/GiB). The collective rkey Allgather
+  // still runs (rkey=0) so init stays in lockstep across PEs.
   SymmMemObjPtr RegisterSymmMemObj(void* localPtr, size_t size, bool heap_begin = false,
                                    bool rdmaRegister = true);
   void DeregisterSymmMemObj(void* localPtr);
@@ -74,18 +79,12 @@ class SymmMemManager {
                                       size_t numChunks);
   void VMMDeregisterSymmMemObj(void* localPtr);
   SymmMemObjPtr GetVMMHeapObj() const { return vmmHeapObj; }
-  size_t GetVMMChunkSize() const { return vmmChunkSize; }
-
-  // Per-NIC keys for send-side routing (proxy mode).
-  // perNicLkeys[nic] = lkey for MY buffer registered on nic's PD.
-  // perNicPeerRkeys[nic][peer] = rkey for peer's buffer registered on nic's PD.
   std::vector<uint32_t> perNicLkeys;
   std::vector<std::vector<uint32_t>> perNicPeerRkeys;
-
-  // Cached heap rkeys — sub-allocations reuse these instead of doing
-  // redundant ibv_reg_mr + Allgather for each shmem_malloc.
   uint32_t heapLkey_{0};
   std::vector<uint32_t> heapRkeys_;
+
+  size_t GetVMMChunkSize() const { return vmmChunkSize; }
 
   // Common Utilities
   SymmMemObjPtr Get(void* localPtr) const;
