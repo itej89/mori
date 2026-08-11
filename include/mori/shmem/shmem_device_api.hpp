@@ -28,7 +28,9 @@
 #include "mori/shmem/internal.hpp"
 #include "mori/shmem/shmem_device_kernels.hpp"
 #include "mori/shmem/shmem_ibgda_kernels.hpp"
+#ifdef MORI_PROXY_ENABLED
 #include "mori/shmem/shmem_proxy_kernels.hpp"
+#endif
 #include "mori/shmem/shmem_p2p_kernels.hpp"
 #include "mori/shmem/shmem_sdma_kernels.hpp"
 
@@ -77,17 +79,23 @@ namespace shmem {
 /*                                         Synchronization                                        */
 /* ---------------------------------------------------------------------------------------------- */
 inline __device__ void ShmemQuietThread() {
+#ifdef MORI_PROXY_ENABLED
   if (GetGlobalProxyStatePtr()->active) { ShmemQuietAllProxy(); return; }
+#endif
   ShmemQuietThreadKernel<application::TransportType::RDMA>();
 }
 
 inline __device__ void ShmemQuietThread(int pe) {
+#ifdef MORI_PROXY_ENABLED
   if (GetGlobalProxyStatePtr()->active) { ShmemQuietThreadKernelPsdImpl_proxy(pe, 0); return; }
+#endif
   DISPATCH_TRANSPORT_TYPE(ShmemQuietThreadKernel, pe, pe);
 }
 
 inline __device__ void ShmemQuietThread(int pe, int qpId) {
+#ifdef MORI_PROXY_ENABLED
   if (GetGlobalProxyStatePtr()->active) { ShmemQuietThreadKernelPsdImpl_proxy(pe, qpId); return; }
+#endif
   DISPATCH_TRANSPORT_TYPE(ShmemQuietThreadKernel, pe, pe, qpId);
 }
 
@@ -180,11 +188,13 @@ inline __device__ void ShmemPutMemNbiThread(
     const application::SymmMemObjPtr dest, size_t destOffset,
     const application::SymmMemObjPtr source, size_t sourceOffset, size_t bytes, int pe,
     int qpId = 0) {
+#ifdef MORI_PROXY_ENABLED
   if (GetGlobalProxyStatePtr()->active) {
     ShmemPutMemNbiThreadKernelImpl_proxy<core::ProviderType::PSD>(
         dest, destOffset, source, sourceOffset, bytes, pe, qpId);
     return;
   }
+#endif
   DISPATCH_TRANSPORT_TYPE(ShmemPutMemNbiThreadKernel, pe, dest, destOffset, source,
                           sourceOffset, bytes, pe, qpId);
 }
@@ -415,11 +425,13 @@ DEFINE_SHMEM_GET_TYPE_API(Double, double, Block)
 inline __device__ void ShmemPutSizeImmNbiThread(const application::SymmMemObjPtr dest,
                                                  size_t destOffset, void* val, size_t bytes,
                                                  int pe, int qpId = 0) {
+#ifdef MORI_PROXY_ENABLED
   if (GetGlobalProxyStatePtr()->active) {
     ShmemPutSizeImmNbiThreadKernelImpl_proxy<core::ProviderType::PSD>(
         dest, destOffset, val, bytes, pe, qpId);
     return;
   }
+#endif
   DISPATCH_TRANSPORT_TYPE(ShmemPutSizeImmNbiThreadKernel, pe, dest, destOffset, val, bytes,
                           pe, qpId);
 }
@@ -485,12 +497,14 @@ inline __device__ void ShmemPutMemNbiSignalThread(
     const application::SymmMemObjPtr source, size_t sourceOffset, size_t bytes,
     const application::SymmMemObjPtr signalDest, size_t signalDestOffset, uint64_t signalValue,
     core::atomicType signalOp, int pe, int qpId = 0) {
+#ifdef MORI_PROXY_ENABLED
   if (GetGlobalProxyStatePtr()->active) {
     ShmemPutMemNbiSignalThreadKernelImpl_proxy<core::ProviderType::PSD, onlyOneSignal>(
         dest, destOffset, source, sourceOffset, bytes,
         signalDest, signalDestOffset, signalValue, signalOp, pe, qpId);
     return;
   }
+#endif
   DISPATCH_TRANSPORT_TYPE_WITH_BOOL(ShmemPutMemNbiSignalThreadKernel, onlyOneSignal, pe,
                                     dest, destOffset, source, sourceOffset, bytes, signalDest,
                                     signalDestOffset, signalValue, signalOp, pe, qpId);
@@ -576,11 +590,13 @@ DEFINE_SHMEM_PUT_TYPE_NBI_SIGNAL_API(Double, double, Block)
 inline __device__ void ShmemAtomicSizeNonFetchThread(
     const application::SymmMemObjPtr dest, size_t destOffset, void* val, size_t bytes,
     core::atomicType amoType, int pe, int qpId = 0) {
+#ifdef MORI_PROXY_ENABLED
   if (GetGlobalProxyStatePtr()->active) {
     ShmemAtomicSizeNonFetchThreadKernelImpl_proxy<core::ProviderType::PSD>(
         dest, destOffset, val, bytes, amoType, pe, qpId);
     return;
   }
+#endif
   DISPATCH_TRANSPORT_TYPE(ShmemAtomicSizeNonFetchThreadKernel, pe, dest, destOffset, val,
                           bytes, amoType, pe, qpId);
 }
@@ -636,10 +652,12 @@ template <typename T>
 inline __device__ T ShmemAtomicTypeFetchThread(
     const application::SymmMemObjPtr dest, size_t destOffset, T val, T compare,
     core::atomicType amoType, int pe, int qpId = 0) {
+#ifdef MORI_PROXY_ENABLED
   if (GetGlobalProxyStatePtr()->active) {
     return ShmemAtomicTypeFetchThreadKernelImpl_proxy<core::ProviderType::PSD, T>(
         dest, destOffset, &val, sizeof(T), amoType, pe, qpId);
   }
+#endif
   T result = DISPATCH_TRANSPORT_DATA_TYPE_WITH_RETURN(ShmemAtomicTypeFetchThreadKernel, pe,
                                                       T, dest, destOffset, &val, &compare,
                                                       sizeof(T), amoType, pe, qpId);
