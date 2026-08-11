@@ -207,15 +207,15 @@ SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bo
           rdmaDeviceContext->RegisterRdmaMemoryRegionAuto(localPtr, size);
       cpuMemObj->lkey = mr.lkey;
       cpuMemObj->peerRkeys[rank] = mr.rkey;
+      bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
+      heapLkey_ = mr.lkey;
+      heapRkeys_.assign(cpuMemObj->peerRkeys, cpuMemObj->peerRkeys + worldSize);
     } else {
       cpuMemObj->lkey = heapLkey_;
       memcpy(cpuMemObj->peerRkeys, heapRkeys_.data(), worldSize * sizeof(uint32_t));
     }
-  }
-  bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
-  if (heap_begin && rdmaDeviceContext && anyRdmaPeer && rdmaRegister) {
-    heapLkey_ = cpuMemObj->lkey;
-    heapRkeys_.assign(cpuMemObj->peerRkeys, cpuMemObj->peerRkeys + worldSize);
+  } else {
+    bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
   }
 
   // Per-NIC MR registration for send-side routing (proxy mode).
