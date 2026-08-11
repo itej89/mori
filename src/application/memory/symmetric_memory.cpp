@@ -217,28 +217,28 @@ SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bo
     heapRkeys_.assign(cpuMemObj->peerRkeys, cpuMemObj->peerRkeys + worldSize);
   }
 
-  // Per-NIC MR registration for send-side routing (proxy mode).
-  // Register the buffer on each NIC's PD and exchange rkeys.
-  const auto& allCtxs = context.GetAllRdmaDeviceContexts();
-  int numNics = static_cast<int>(allCtxs.size());
-  // Per-NIC MR registration only for the heap (heap_begin=true).
-  // Sub-allocations within the heap share the heap's MR — re-registering
-  // them wastes time (8 barriers × 8 Allgathers per call) and overwrites
-  // the heap's perNicLkeys/perNicPeerRkeys with sub-allocation keys.
-  if (numNics > 1 && anyRdmaPeer && heap_begin) {
-    perNicLkeys.resize(numNics, 0);
-    perNicPeerRkeys.resize(numNics);
-    for (int n = 0; n < numNics; n++) {
-      bootNet.Barrier();
-      perNicPeerRkeys[n].resize(worldSize, 0);
-      if (allCtxs[n]) {
-        auto mr = allCtxs[n]->RegisterRdmaMemoryRegionAuto(localPtr, size);
-        perNicLkeys[n] = mr.lkey;
-        perNicPeerRkeys[n][rank] = mr.rkey;
-      }
-      bootNet.Allgather(&perNicPeerRkeys[n][rank], perNicPeerRkeys[n].data(), sizeof(uint32_t));
-    }
-  }
+//  // Per-NIC MR registration for send-side routing (proxy mode).
+//  // Register the buffer on each NIC's PD and exchange rkeys.
+//  const auto& allCtxs = context.GetAllRdmaDeviceContexts();
+//  int numNics = static_cast<int>(allCtxs.size());
+//  // Per-NIC MR registration only for the heap (heap_begin=true).
+//  // Sub-allocations within the heap share the heap's MR — re-registering
+//  // them wastes time (8 barriers × 8 Allgathers per call) and overwrites
+//  // the heap's perNicLkeys/perNicPeerRkeys with sub-allocation keys.
+//  if (numNics > 1 && anyRdmaPeer && heap_begin) {
+//    perNicLkeys.resize(numNics, 0);
+//    perNicPeerRkeys.resize(numNics);
+//    for (int n = 0; n < numNics; n++) {
+//      bootNet.Barrier();
+//      perNicPeerRkeys[n].resize(worldSize, 0);
+//      if (allCtxs[n]) {
+//        auto mr = allCtxs[n]->RegisterRdmaMemoryRegionAuto(localPtr, size);
+//        perNicLkeys[n] = mr.lkey;
+//        perNicPeerRkeys[n][rank] = mr.rkey;
+//      }
+//      bootNet.Allgather(&perNicPeerRkeys[n][rank], perNicPeerRkeys[n].data(), sizeof(uint32_t));
+//    }
+//  }
 
   // Copy memory object to GPU memory, we need to access it from GPU directly
   SymmMemObj* gpuMemObj;
