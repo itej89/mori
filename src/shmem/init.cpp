@@ -36,8 +36,6 @@
 #include "hip/hip_runtime_api.h"
 #include "mori/application/application.hpp"
 #include "mori/application/bootstrap/socket_bootstrap.hpp"
-#include "mori/application/transport/rdma/providers/mlx5/mlx5.hpp"
-#include "mori/application/transport/rdma/providers/ionic/ionic.hpp"
 #include "mori/application/utils/cpu_affinity.hpp"
 #include "mori/core/transport/rdma/proxy/proxy_thread.hpp"
 #include "mori/shmem/internal.hpp"
@@ -596,10 +594,10 @@ void GpuStateInit(ShmemStates* states) {
   states->gpuStates.worldSize = states->bootStates->worldSize;
   states->gpuStates.numQpPerPe = states->rdmaStates->commContext->GetNumQpPerPe();
 
-  // Check if EP-over-RDMA proxy mode is requested
+  // Check if IBGDA proxy mode is requested
   const char* proxyEnv = std::getenv("MORI_EP_OVER_RDMA");
   if (proxyEnv && (std::string(proxyEnv) == "1" || std::string(proxyEnv) == "true")) {
-    auto& ps = states->proxyGpuState;
+    // Determine number of NICs for per-NIC ring allocation
     int numNics = 1;
     if (states->rdmaStates && states->rdmaStates->commContext) {
       numNics = static_cast<int>(states->rdmaStates->commContext->GetAllRdmaDeviceContexts().size());
@@ -619,21 +617,23 @@ void GpuStateInit(ShmemStates* states) {
                                             hipHostRegisterMapped | hipHostRegisterPortable);
         if (regErr == hipSuccess) {
           memset(ring, 0, sizeof(core::ProxyRing));
-          ps.rings[n] = ring;
+          states->proxyGpuState.rings[n] = ring;
           allocated++;
         } else {
           free(ringPtr);
         }
       }
     }
-    ps.numRings = allocated;
-    ps.numNics = numNics;
-    ps.localGpuIdx = states->gpuStates.rank % numNics;
-    ps.active = (allocated > 0);
-    ps.numQpPerPe = states->rdmaStates->commContext->GetNumQpPerPe();
+    states->proxyGpuState.numRings = allocated;
+    states->proxyGpuState.numNics = numNics;
+    states->proxyGpuState.localGpuIdx = states->gpuStates.rank % numNics;
+    states->proxyGpuState.active = (allocated > 0);
+    states->proxyGpuState.numQpPerPe = states->rdmaStates->commContext->GetNumQpPerPe();
     MORI_SHMEM_INFO("Proxy: {} rings allocated for {} NICs, localGpuIdx={}",
-                    allocated, numNics, ps.localGpuIdx);
+                    allocated, numNics, states->proxyGpuState.localGpuIdx);
   }
+
+  fprintf(stderr, "[MoRI] SHMEM init: proxy setup done, rank=%d\n", states->gpuStates.rank);
 
   // Copy communication metadata to GPU
   CopyTransportTypesToGpu(states);
@@ -733,7 +733,6 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
   MemoryStatesInit(states);
   GpuStateInit(states);
 
-
   // Start per-NIC proxy threads if proxy mode is enabled
   if (states->proxyGpuState.active && states->proxyGpuState.numRings > 0) {
     auto* ctx = states->rdmaStates->commContext;
@@ -743,7 +742,7 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
     const auto& perNicLkeys = states->memoryStates->symmMemMgr->perNicLkeys;
     const auto& perNicRkeys = states->memoryStates->symmMemMgr->perNicPeerRkeys;
     int myLocalGpu = states->proxyGpuState.localGpuIdx;
-    int gpuId = states->gpuStates.rank % std::max(1, numNics);
+    int gpuId = states->gpuStates.rank % numNics;
 
     for (int n = 0; n < numNics; n++) {
       if (!states->proxyGpuState.rings[n]) continue;
@@ -754,7 +753,7 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
       for (size_t i = 0; i < hostEndpoints.size(); i++) {
         if (hostEndpoints[i].ibvHandle.qp != nullptr) {
           int pe = i / numQpPerPe;
-          int peerLocalGpu = pe % std::max(1, numNics);
+          int peerLocalGpu = pe % numNics;
           int nicIdx = (numNics > 1) ? (std::max(myLocalGpu, peerLocalGpu) % numNics) : 0;
           if (nicIdx != n) continue;
           uint32_t lkey = (nicIdx < (int)perNicLkeys.size()) ? perNicLkeys[nicIdx] : 0;
@@ -776,6 +775,7 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
       }
     }
     MORI_SHMEM_INFO("Proxy: {} threads started for {} NICs", states->proxyThreads.size(), numNics);
+    CopyGpuStatesToDevice(states);
   }
 
   states->status = ShmemStatesStatus::Initialized;
