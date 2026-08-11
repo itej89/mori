@@ -296,7 +296,8 @@ void Context::InitializeTopologyAndTransports() {
       savedEpConfig.maxCqeNum =
           (vid == static_cast<uint32_t>(RdmaDeviceVendorId::Broadcom)) ? 1 : 4096;
       savedEpConfig.alignment = 4096;
-      savedEpConfig.onGpu = true;
+      const char* epOverRdma = std::getenv("MORI_EP_OVER_RDMA");
+      savedEpConfig.onGpu = !(epOverRdma && std::string(epOverRdma) == "1");
     }
   }
 
