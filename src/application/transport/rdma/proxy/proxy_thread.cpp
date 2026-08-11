@@ -134,7 +134,7 @@ bool ProxyThread::BuildWr(volatile ProxyCmd* cmd, ProxyQpHandle& qph,
       sge.length = 16;
       wr.opcode = IBV_WR_SEND_WITH_IMM;
       wr.imm_data = htonl(0xA70C);
-      wr.send_flags |= IBV_SEND_FENCE | IBV_SEND_INLINE;
+      wr.send_flags |= IBV_SEND_INLINE;
       break;
     }
     default:
