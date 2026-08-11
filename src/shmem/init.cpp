@@ -737,6 +737,10 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
         qpCount++;
       }
     }
+    { int withRecv = 0;
+      for (size_t j = 0; j < qps.size(); j++) if (qps[j].qp && qps[j].recv_buf) withRecv++;
+      fprintf(stderr, "[PROXY-INIT] qpCount=%d withRecv=%d\n", qpCount, withRecv);
+    }
     if (qpCount > 0) {
       auto thread = std::make_unique<core::ProxyThread>();
       thread->Init(ps.rings[0], std::move(qps), 0);

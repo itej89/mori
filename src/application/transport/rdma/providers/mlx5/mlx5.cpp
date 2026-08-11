@@ -683,10 +683,12 @@ void Mlx5DeviceContext::ConnectEndpoint(const RdmaEndpointHandle& local,
     RdmaDevice* rdmaDevice = GetRdmaDevice();
     const ibv_port_attr& portAttr = *(rdmaDevice->GetPortAttrMap()->find(local.portId)->second);
 
+    int err;
     { ibv_qp_attr a{}; a.qp_state = IBV_QPS_INIT; a.port_num = local.portId;
       a.qp_access_flags = IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
                            IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_ATOMIC;
-      ibv_modify_qp(plainQp, &a, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS); }
+      err = ibv_modify_qp(plainQp, &a, IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS);
+      if (err) fprintf(stderr, "[PROXY-MLX5] INIT failed: %d\n", err); }
 
     { ibv_qp_attr a{}; a.qp_state = IBV_QPS_RTR;
       a.path_mtu = portAttr.active_mtu;
@@ -698,13 +700,18 @@ void Mlx5DeviceContext::ConnectEndpoint(const RdmaEndpointHandle& local,
       a.ah_attr.sl = ReadRdmaServiceLevelEnv().value_or(0);
       std::optional<uint8_t> tc = ReadRdmaTrafficClassEnv();
       if (tc.has_value()) a.ah_attr.grh.traffic_class = tc.value();
-      ibv_modify_qp(plainQp, &a, IBV_QP_STATE | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
-          IBV_QP_RQ_PSN | IBV_QP_AV | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER); }
+      err = ibv_modify_qp(plainQp, &a, IBV_QP_STATE | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
+          IBV_QP_RQ_PSN | IBV_QP_AV | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER);
+      if (err) fprintf(stderr, "[PROXY-MLX5] RTR failed: %d\n", err); }
 
     { ibv_qp_attr a{}; a.qp_state = IBV_QPS_RTS; a.sq_psn = local.psn;
       a.timeout = 14; a.retry_cnt = 7; a.rnr_retry = 7; a.max_rd_atomic = 15;
-      ibv_modify_qp(plainQp, &a, IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT |
-          IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC); }
+      err = ibv_modify_qp(plainQp, &a, IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT |
+          IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_MAX_QP_RD_ATOMIC);
+      if (err) fprintf(stderr, "[PROXY-MLX5] RTS failed: %d\n", err); }
+
+    fprintf(stderr, "[PROXY-MLX5] QP %u connected, recv_buf=%p recv_count=%u\n",
+            local_qpn, proxyRecvInfo[local_qpn].buf, proxyRecvInfo[local_qpn].count);
 
     {
       constexpr int kRecvCount = 512;
