@@ -693,7 +693,7 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
 
   // EP-over-RDMA proxy: allocate ring and start CPU proxy thread
   const char* epOverRdma = std::getenv("MORI_EP_OVER_RDMA");
-  MORI_SHMEM_INFO("MORI_EP_OVER_RDMA={}", epOverRdma ? epOverRdma : "unset");
+  fprintf(stderr, "[MORI-PROXY] MORI_EP_OVER_RDMA=%s\n", epOverRdma ? epOverRdma : "unset");
   if (epOverRdma && (std::string(epOverRdma) == "1")) {
     auto* ctx = states->rdmaStates->commContext;
     auto& ps = states->proxyGpuState;
@@ -706,15 +706,14 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
                       hipHostRegisterMapped | hipHostRegisterPortable);
       memset(ring, 0, sizeof(core::ProxyRing));
       ps.rings[0] = ring;
-      MORI_SHMEM_INFO("EP-over-RDMA proxy: ring allocated at {:p}, size={}",
-                       (void*)ring, sizeof(core::ProxyRing));
+      fprintf(stderr, "[MORI-PROXY] ring allocated at %p, size=%zu\n", (void*)ring,
+              sizeof(core::ProxyRing));
     }
     ps.active = true;
     ps.numRings = 1;
     ps.numNics = 1;
     ps.localGpuIdx = 0;
     ps.numQpPerPe = ctx->GetNumQpPerPe();
-    MORI_SHMEM_INFO("EP-over-RDMA proxy: active={}, numQpPerPe={}", ps.active, ps.numQpPerPe);
 
     const auto& hostEndpoints = ctx->GetRdmaEndpoints();
     int numQpPerPe = ctx->GetNumQpPerPe();
@@ -726,18 +725,18 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
         qpCount++;
       }
     }
-    MORI_SHMEM_INFO("EP-over-RDMA proxy: {} of {} endpoints have QPs", qpCount,
-                     hostEndpoints.size());
+    fprintf(stderr, "[MORI-PROXY] %d of %zu endpoints have QPs, numQpPerPe=%d\n", qpCount,
+            hostEndpoints.size(), numQpPerPe);
     if (qpCount > 0) {
       auto thread = std::make_unique<core::ProxyThread>();
       thread->Init(ps.rings[0], std::move(qps), 0);
       thread->Start();
       states->proxyThreads.push_back(std::move(thread));
     }
-    MORI_SHMEM_INFO("EP-over-RDMA proxy: {} thread(s) started, proxyGpuState.active={}",
-                     states->proxyThreads.size(), states->proxyGpuState.active);
+    fprintf(stderr, "[MORI-PROXY] %zu thread(s) started, active=%d\n",
+            states->proxyThreads.size(), (int)states->proxyGpuState.active);
   } else {
-    MORI_SHMEM_INFO("EP-over-RDMA proxy: DISABLED (native IBGDA path)");
+    fprintf(stderr, "[MORI-PROXY] DISABLED — using native IBGDA path\n");
   }
 
   states->status = ShmemStatesStatus::Initialized;
