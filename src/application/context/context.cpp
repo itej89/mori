@@ -186,8 +186,12 @@ void Context::InitializeTopologyAndTransports() {
   }
   assert(rankInNode < 8);
 
-  // Init rdma context
-  rdmaContext.reset(new RdmaContext(RdmaBackendType::DirectVerbs));
+  // Init rdma context — use generic ibverbs when CPU proxy is active
+  const char* epOverRdmaCtx = std::getenv("MORI_EP_OVER_RDMA");
+  RdmaBackendType backend = (epOverRdmaCtx && std::string(epOverRdmaCtx) == "1")
+                                ? RdmaBackendType::IBVerbs
+                                : RdmaBackendType::DirectVerbs;
+  rdmaContext.reset(new RdmaContext(backend));
   const RdmaDeviceList& devices = rdmaContext->GetRdmaDeviceList();
   ActiveDevicePortList activeDevicePortList = GetActiveDevicePortList(devices);
 
