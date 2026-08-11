@@ -28,13 +28,11 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <string>
 #include <vector>
 
-#include "mori/application/transport/rdma/providers/ionic/ionic.hpp"
 #include "mori/application/transport/sdma/anvil.hpp"
 #include "mori/application/utils/check.hpp"
 #include "mori/utils/env_utils.hpp"
@@ -245,22 +243,6 @@ void Context::InitializeTopologyAndTransports() {
                   devicePortId, device->Name());
   }
 
-  // Build per-rail device contexts only when multiple NICs are present.
-  // On single-NIC setups (CX7) creating extra contexts wastes GPU resources
-  // and can interfere with IBGDA. The rail-affinity code below falls back to
-  // rdmaDeviceContext when allRdmaDeviceContexts is empty or size==1.
-  if (activeDevicePortList.size() > 1) {
-    allRdmaDeviceContexts.clear();
-    for (const auto& dp : activeDevicePortList) {
-      RdmaDeviceContext* ctx = dp.first->CreateRdmaDeviceContext();
-      if (ctx != nullptr) {
-        allRdmaDeviceContexts.emplace_back(ctx);
-      }
-    }
-    MORI_APP_INFO("rank {} allRdmaDeviceContexts size: {}", LocalRank(),
-                  allRdmaDeviceContexts.size());
-  }
-
   int numQpPerPe = 4;
   const char* envNumQp = std::getenv("MORI_NUM_QP_PER_PE");
   if (envNumQp != nullptr) {
@@ -398,23 +380,11 @@ void Context::EnsureSdmaTransport(int requestedChannels) {
 void Context::BuildAndConnectInitialEndpoints() {
   // Build the worldSize × numQpPerPe rdmaEps vector. Non-RDMA peer slots are
   // populated with empty stubs to keep the indexing uniform.
-  //
-  // Rail-affinity QP pairing for rail-isolated fabrics (e.g. Pensando AINIC):
-  // ionic_N can only reach remote ionic_N. Both sides use a symmetric formula
-  // — max(myLocalGpu, peerLocalGpu) — so both sides agree. On non-rail-isolated
-  // fabrics (e.g. CX7) allRdmaDeviceContexts has 1 entry and behaviour is unchanged.
-  const int numRailContexts = std::max(1, static_cast<int>(allRdmaDeviceContexts.size()));
-  const int myLocalGpu = LocalRankInNode();
   rdmaEps.reserve(static_cast<size_t>(WorldSize()) * numQpPerPe);
   for (int i = 0; i < WorldSize(); i++) {
     if (transportTypes[i] == TransportType::RDMA) {
       for (int qp = 0; qp < numQpPerPe; qp++) {
-        int peerLocalGpu = i % numRailContexts;
-        int agreedRail = std::max(myLocalGpu, peerLocalGpu) % numRailContexts;
-        RdmaDeviceContext* ctx = (numRailContexts > 1)
-            ? allRdmaDeviceContexts[agreedRail].get()
-            : rdmaDeviceContext.get();
-        RdmaEndpoint ep = ctx->CreateRdmaEndpoint(savedEpConfig);
+        RdmaEndpoint ep = rdmaDeviceContext->CreateRdmaEndpoint(savedEpConfig);
         rdmaEps.push_back(ep);
       }
     } else {
@@ -428,7 +398,7 @@ void Context::BuildAndConnectInitialEndpoints() {
   int totalEps = WorldSize() * numQpPerPe;
   std::vector<RdmaEndpointHandle> localToPeerEpHandles(totalEps);
   std::vector<RdmaEndpointHandle> peerToLocalEpHandles(totalEps);
-  for (int i = 0; i < (int)rdmaEps.size(); i++) {
+  for (int i = 0; i < rdmaEps.size(); i++) {
     localToPeerEpHandles[i] = rdmaEps[i].handle;
   }
   bootNet.AllToAll(localToPeerEpHandles.data(), peerToLocalEpHandles.data(),
@@ -441,20 +411,8 @@ void Context::BuildAndConnectInitialEndpoints() {
     }
     for (int qp = 0; qp < numQpPerPe; qp++) {
       int epIndex = peer * numQpPerPe + qp;
-      int peerLocalGpu = peer % numRailContexts;
-      int agreedRail = std::max(myLocalGpu, peerLocalGpu) % numRailContexts;
-      RdmaDeviceContext* ctx = (numRailContexts > 1)
-          ? allRdmaDeviceContexts[agreedRail].get()
-          : rdmaDeviceContext.get();
-      ctx->ConnectEndpoint(localToPeerEpHandles[epIndex],
-                           peerToLocalEpHandles[epIndex], qp);
-      auto* ionic = dynamic_cast<IonicDeviceContext*>(ctx);
-      if (ionic) {
-        auto ri = ionic->GetProxyRecvInfo(rdmaEps[epIndex].handle.qpn);
-        rdmaEps[epIndex].ibvHandle.recvBuf = ri.buf;
-        rdmaEps[epIndex].ibvHandle.recvLkey = ri.lkey;
-        rdmaEps[epIndex].ibvHandle.recvCount = ri.count;
-      }
+      rdmaDeviceContext->ConnectEndpoint(localToPeerEpHandles[epIndex],
+                                         peerToLocalEpHandles[epIndex], qp);
     }
   }
 }
@@ -484,13 +442,7 @@ std::vector<RdmaEndpoint> Context::CreateAdditionalEndpoints(int qpPerPe,
       continue;
     }
     for (int qp = 0; qp < qpPerPe; qp++) {
-      const int nCtx = static_cast<int>(allRdmaDeviceContexts.size());
-      int peerLocalGpu = i % nCtx;
-      int agreedRail = std::max(LocalRankInNode(), peerLocalGpu) % nCtx;
-      RdmaDeviceContext* ctx = (nCtx > 1)
-          ? allRdmaDeviceContexts[agreedRail].get()
-          : rdmaDeviceContext.get();
-      RdmaEndpoint ep = ctx->CreateRdmaEndpoint(savedEpConfig);
+      RdmaEndpoint ep = rdmaDeviceContext->CreateRdmaEndpoint(savedEpConfig);
       eps.push_back(ep);
     }
   }
@@ -513,13 +465,7 @@ void Context::ConnectAdditionalEndpoints(std::vector<RdmaEndpoint>& endpoints, i
     if (!ShouldCreateQpForPeer(peer, LocalRank(), peerCaps, peerMask)) continue;
     for (int qp = 0; qp < qpPerPe; qp++) {
       int idx = peer * qpPerPe + qp;
-      const int nCtx = static_cast<int>(allRdmaDeviceContexts.size());
-      int peerLocalGpu = peer % nCtx;
-      int agreedRail = std::max(LocalRankInNode(), peerLocalGpu) % nCtx;
-      RdmaDeviceContext* ctx = (nCtx > 1)
-          ? allRdmaDeviceContexts[agreedRail].get()
-          : rdmaDeviceContext.get();
-      ctx->ConnectEndpoint(localHandles[idx], peerHandles[idx], qp);
+      rdmaDeviceContext->ConnectEndpoint(localHandles[idx], peerHandles[idx], qp);
     }
   }
 }
