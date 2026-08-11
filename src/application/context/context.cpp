@@ -174,6 +174,13 @@ void Context::CollectHostNames() {
 // / Context::IsP2PDisabled() instead of getenv anywhere outside the
 // constructor.
 
+int Context::SameHostPeersBefore(int rank) const {
+  int n = 0;
+  for (int j = 0; j < rank; j++)
+    if (peerInfos[j].sameHost) n++;
+  return n;
+}
+
 void Context::InitializeTopologyAndTransports() {
   // Find my rank in node
   for (int i = 0; i <= LocalRank(); i++) {
