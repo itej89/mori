@@ -36,6 +36,8 @@
 #include "hip/hip_runtime_api.h"
 #include "mori/application/application.hpp"
 #include "mori/application/bootstrap/socket_bootstrap.hpp"
+#include "mori/application/transport/rdma/providers/mlx5/mlx5.hpp"
+#include "mori/application/transport/rdma/providers/ionic/ionic.hpp"
 #include "mori/application/utils/cpu_affinity.hpp"
 #include "mori/core/transport/rdma/proxy/proxy_thread.hpp"
 #include "mori/shmem/internal.hpp"
@@ -713,15 +715,25 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
     ps.localGpuIdx = 0;
     ps.numQpPerPe = ctx->GetNumQpPerPe();
 
-    auto& hostEndpoints = ctx->GetRdmaEndpoints();
+    const auto& hostEndpoints = ctx->GetRdmaEndpoints();
     auto* devCtx = ctx->GetRdmaDeviceContext();
+    auto* mlx5Ctx = dynamic_cast<application::Mlx5DeviceContext*>(devCtx);
+    auto* ionicCtx = dynamic_cast<application::IonicDeviceContext*>(devCtx);
     std::vector<core::ProxyQpHandle> qps(hostEndpoints.size());
     int qpCount = 0;
     for (size_t i = 0; i < hostEndpoints.size(); i++) {
       if (hostEndpoints[i].ibvHandle.qp != nullptr) {
+        void* rBuf = nullptr; uint32_t rLkey = 0; uint32_t rCount = 0;
+        uint32_t qpn = hostEndpoints[i].handle.qpn;
+        if (mlx5Ctx) {
+          auto ri = mlx5Ctx->GetProxyRecvInfo(qpn);
+          rBuf = ri.buf; rLkey = ri.lkey; rCount = ri.count;
+        } else if (ionicCtx) {
+          auto ri = ionicCtx->GetProxyRecvInfo(qpn);
+          rBuf = ri.buf; rLkey = ri.lkey; rCount = ri.count;
+        }
         qps[i] = {hostEndpoints[i].ibvHandle.qp, hostEndpoints[i].ibvHandle.cq, 0, 0,
-                   hostEndpoints[i].ibvHandle.recvBuf, hostEndpoints[i].ibvHandle.recvLkey,
-                   hostEndpoints[i].ibvHandle.recvCount};
+                   rBuf, rLkey, rCount};
         qpCount++;
       }
     }
