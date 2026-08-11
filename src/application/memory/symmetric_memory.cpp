@@ -200,7 +200,7 @@ SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bo
       break;
     }
   }
-  if (rdmaDeviceContext && anyRdmaPeer && rdmaRegister) {
+  if (rdmaDeviceContext && anyRdmaPeer) {
     if (heap_begin) {
       application::RdmaMemoryRegion mr =
           rdmaDeviceContext->RegisterRdmaMemoryRegionAuto(localPtr, size);
