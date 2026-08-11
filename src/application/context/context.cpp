@@ -186,12 +186,17 @@ void Context::InitializeTopologyAndTransports() {
   }
   assert(rankInNode < 8);
 
-  // Init rdma context — always DirectVerbs for MR/lkey compatibility.
-  // When MORI_EP_OVER_RDMA=1, onGpu=false creates host-based QPs usable by proxy.
+  // Init rdma context. When MORI_EP_OVER_RDMA=1, use IBVerbs so the proxy
+  // thread gets standard ibv_qp* handles for ibv_post_send. MR lkeys are
+  // registered through the IBVerbs PD in this mode.
   const char* epOverRdmaCtx = std::getenv("MORI_EP_OVER_RDMA");
-  fprintf(stderr, "[MORI-PROXY] RDMA backend: DirectVerbs (MORI_EP_OVER_RDMA=%s)\n",
+  RdmaBackendType backend = (epOverRdmaCtx && std::string(epOverRdmaCtx) == "1")
+                                ? RdmaBackendType::IBVerbs
+                                : RdmaBackendType::DirectVerbs;
+  fprintf(stderr, "[MORI-PROXY] RDMA backend: %s (MORI_EP_OVER_RDMA=%s)\n",
+          backend == RdmaBackendType::IBVerbs ? "IBVerbs" : "DirectVerbs",
           epOverRdmaCtx ? epOverRdmaCtx : "unset");
-  rdmaContext.reset(new RdmaContext(RdmaBackendType::DirectVerbs));
+  rdmaContext.reset(new RdmaContext(backend));
   const RdmaDeviceList& devices = rdmaContext->GetRdmaDeviceList();
   ActiveDevicePortList activeDevicePortList = GetActiveDevicePortList(devices);
 
@@ -300,8 +305,7 @@ void Context::InitializeTopologyAndTransports() {
       savedEpConfig.maxCqeNum =
           (vid == static_cast<uint32_t>(RdmaDeviceVendorId::Broadcom)) ? 1 : 4096;
       savedEpConfig.alignment = 4096;
-      const char* epOverRdma = std::getenv("MORI_EP_OVER_RDMA");
-      savedEpConfig.onGpu = !(epOverRdma && std::string(epOverRdma) == "1");
+      savedEpConfig.onGpu = (backend != RdmaBackendType::IBVerbs);
     }
   }
 
