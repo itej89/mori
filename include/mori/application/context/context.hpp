@@ -134,11 +134,14 @@ class Context {
   // initializes the SDMA queues if any peer was resolved to SDMA.
   void BuildInitialEndpoints();
 
-  // Idempotent setup of anvil SDMA queues for all canSDMA peers. Useful when
-  // SHMEM-style "BuildInitialEndpoints does it for me" is not in play — e.g.
-  // CCO chooses SDMA per-DevComm and needs the queues materialized on demand.
-  // No-op if already set up, or if no peer has canSDMA capability.
-  void EnsureSdmaTransport();
+  // Idempotent setup of anvil SDMA queues for all canSDMA peers. No-op if
+  // already set up or if no peer has canSDMA capability. requestedChannels is
+  // the SDMA channels per GPU pair (0 = MORI_SDMA_NUM_CHANNELS env default); the
+  // first call per Context fixes the count, query SdmaChannels() for it.
+  void EnsureSdmaTransport(int requestedChannels = 0);
+
+  // SDMA channels per pair connected by EnsureSdmaTransport (0 if never set up).
+  int SdmaChannels() const { return sdmaChannels_; }
 
   // Create a new independent set of QP endpoints. `peerMask[i] == true` means
   // peer i gets `numQpPerPe` real QPs; `false` peers get empty stub slots so
@@ -179,6 +182,9 @@ class Context {
   };
 
  private:
+  // Number of same-host peers with rank < `rank` (a peer's within-node device id).
+  int SameHostPeersBefore(int rank) const;
+
   BootstrapNetwork& bootNet;
   int rankInNode{-1};
   int numQpPerPe{4};
@@ -192,13 +198,12 @@ class Context {
 
   std::unique_ptr<RdmaContext> rdmaContext{nullptr};
   std::unique_ptr<RdmaDeviceContext> rdmaDeviceContext{nullptr};
-  // One context per available RDMA device (rail). Index = QP slot index.
-  // For non-rail-isolated fabrics this has exactly one entry (same as rdmaDeviceContext).
   std::vector<std::unique_ptr<RdmaDeviceContext>> allRdmaDeviceContexts;
 
   std::vector<RdmaEndpoint> rdmaEps;
   bool initialEndpointsBuilt{false};
   bool sdmaSetupDone{false};
+  int sdmaChannels_{0};  // channels/pair connected by EnsureSdmaTransport (first call wins)
 
   std::unique_ptr<TopoSystem> topo{nullptr};
 

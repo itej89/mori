@@ -83,7 +83,6 @@ class SymmMemManager {
   std::vector<std::vector<uint32_t>> perNicPeerRkeys;
   uint32_t heapLkey_{0};
   std::vector<uint32_t> heapRkeys_;
-
   size_t GetVMMChunkSize() const { return vmmChunkSize; }
 
   // Common Utilities
