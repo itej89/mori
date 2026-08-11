@@ -191,6 +191,9 @@ void Context::InitializeTopologyAndTransports() {
   RdmaBackendType backend = (epOverRdmaCtx && std::string(epOverRdmaCtx) == "1")
                                 ? RdmaBackendType::IBVerbs
                                 : RdmaBackendType::DirectVerbs;
+  MORI_APP_INFO("RDMA backend: {} (MORI_EP_OVER_RDMA={})",
+                backend == RdmaBackendType::IBVerbs ? "IBVerbs" : "DirectVerbs",
+                epOverRdmaCtx ? epOverRdmaCtx : "unset");
   rdmaContext.reset(new RdmaContext(backend));
   const RdmaDeviceList& devices = rdmaContext->GetRdmaDeviceList();
   ActiveDevicePortList activeDevicePortList = GetActiveDevicePortList(devices);

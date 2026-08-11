@@ -115,6 +115,8 @@ void CopyGpuStatesToDevice(ShmemStates* states) {
   // Copy ProxyGpuState if EP-over-RDMA proxy is active
   if (states->proxyGpuState.active) {
     const ProxyGpuState* proxyState = &states->proxyGpuState;
+    MORI_SHMEM_INFO("CopyGpuStatesToDevice: ProxyGpuState active={}, numRings={}, ring[0]={:p}",
+                     proxyState->active, proxyState->numRings, (void*)proxyState->rings[0]);
     if (ms.module != nullptr) {
       ProxyGpuState* deviceProxyPtr = nullptr;
       size_t symbolSize = 0;
@@ -124,12 +126,19 @@ void CopyGpuStatesToDevice(ShmemStates* states) {
       if (err == hipSuccess && deviceProxyPtr != nullptr) {
         HIP_RUNTIME_CHECK(
             hipMemcpy(deviceProxyPtr, proxyState, sizeof(ProxyGpuState), hipMemcpyHostToDevice));
-        MORI_SHMEM_TRACE("Copied ProxyGpuState to JIT module ({:p})", (void*)deviceProxyPtr);
+        MORI_SHMEM_INFO("Copied ProxyGpuState to JIT module: device={:p}, size={}",
+                         (void*)deviceProxyPtr, symbolSize);
+      } else {
+        MORI_SHMEM_ERROR("Failed to find globalProxyState in JIT module: err={}", (int)err);
       }
+    } else {
+      MORI_SHMEM_ERROR("CopyGpuStatesToDevice: JIT module is null, cannot copy ProxyGpuState");
     }
     for (auto& provider : GpuStatesProviders()) {
-      (void)provider;  // ProxyGpuState only needed in JIT module for now
+      (void)provider;
     }
+  } else {
+    MORI_SHMEM_INFO("CopyGpuStatesToDevice: proxy NOT active, using native IBGDA");
   }
 }
 
