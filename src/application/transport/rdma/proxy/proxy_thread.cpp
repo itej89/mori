@@ -153,8 +153,13 @@ void ProxyThread::MainLoop() {
   uint32_t wr_qp[kMaxBatch];
   int batch_count = 0;
 
+  uint64_t loop_count = 0;
+  uint64_t total_posted = 0;
+  fprintf(stderr, "[MORI-PROXY-THREAD] MainLoop started, gpu_id=%d\n", gpu_id_);
+
   while (!ring_->shutdown) {
     batch_count = 0;
+    loop_count++;
 
     // Collect up to kMaxBatch pending commands from the ring
     uint32_t head = ring_->gpu_head;
@@ -221,9 +226,19 @@ void ProxyThread::MainLoop() {
 
           if (ret == 0) {
             ops_posted_++;
+            total_posted++;
+            if (total_posted <= 5) {
+              fprintf(stderr, "[MORI-PROXY-THREAD] posted op #%lu qp=%u lkey=0x%x rkey=0x%x len=%u\n",
+                      total_posted, qph.qp->qp_num, to_post->sg_list->lkey,
+                      to_post->wr.rdma.rkey, to_post->sg_list->length);
+            }
             break;
           }
 
+          if (total_posted == 0) {
+            fprintf(stderr, "[MORI-PROXY-THREAD] ibv_post_send FAILED ret=%d errno=%d (%s)\n",
+                    ret, errno, strerror(errno));
+          }
           if (ret == ENOMEM) {
             // SQ full: drain CQEs and retry from the failed WR
             to_post = bad ? bad : to_post;
