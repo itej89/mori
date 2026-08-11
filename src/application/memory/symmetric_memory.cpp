@@ -220,22 +220,22 @@ SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bo
     heapRkeys_.assign(cpuMemObj->peerRkeys, cpuMemObj->peerRkeys + worldSize);
   }
 
-  const auto& allCtxs = context.GetAllRdmaDeviceContexts();
-  int numNics = static_cast<int>(allCtxs.size());
-  if (numNics > 1 && anyRdmaPeer && heap_begin && rdmaRegister) {
-    perNicLkeys.resize(numNics, 0);
-    perNicPeerRkeys.resize(numNics);
-    for (int n = 0; n < numNics; n++) {
-      bootNet.Barrier();
-      perNicPeerRkeys[n].resize(worldSize, 0);
-      if (allCtxs[n]) {
-        auto mr = allCtxs[n]->RegisterRdmaMemoryRegionAuto(localPtr, size);
-        perNicLkeys[n] = mr.lkey;
-        perNicPeerRkeys[n][rank] = mr.rkey;
-      }
-      bootNet.Allgather(&perNicPeerRkeys[n][rank], perNicPeerRkeys[n].data(), sizeof(uint32_t));
-    }
-  }
+//  const auto& allCtxs = context.GetAllRdmaDeviceContexts();
+//  int numNics = static_cast<int>(allCtxs.size());
+//  if (numNics > 1 && anyRdmaPeer && heap_begin && rdmaRegister) {
+//    perNicLkeys.resize(numNics, 0);
+//    perNicPeerRkeys.resize(numNics);
+//    for (int n = 0; n < numNics; n++) {
+//      bootNet.Barrier();
+//      perNicPeerRkeys[n].resize(worldSize, 0);
+//      if (allCtxs[n]) {
+//        auto mr = allCtxs[n]->RegisterRdmaMemoryRegionAuto(localPtr, size);
+//        perNicLkeys[n] = mr.lkey;
+//        perNicPeerRkeys[n][rank] = mr.rkey;
+//      }
+//      bootNet.Allgather(&perNicPeerRkeys[n][rank], perNicPeerRkeys[n].data(), sizeof(uint32_t));
+//    }
+//  }
 
   // Copy memory object to GPU memory, we need to access it from GPU directly
   SymmMemObj* gpuMemObj;
