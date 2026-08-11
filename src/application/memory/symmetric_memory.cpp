@@ -222,7 +222,7 @@ SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bo
 
   const auto& allCtxs = context.GetAllRdmaDeviceContexts();
   int numNics = static_cast<int>(allCtxs.size());
-  if (numNics > 1 && anyRdmaPeer && heap_begin && rdmaRegister) {
+  if (numNics > 1 && anyRdmaPeer && heap_begin) {
     perNicLkeys.resize(numNics, 0);
     perNicPeerRkeys.resize(numNics);
     for (int n = 0; n < numNics; n++) {
