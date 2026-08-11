@@ -201,20 +201,23 @@ SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bo
   // node-block. The rkey stays 0 and the Allgather below still runs, so the
   // collective register stays in lockstep.
   if (rdmaDeviceContext && anyRdmaPeer && rdmaRegister) {
-    if (heap_begin) {
+    if (heap_begin || heapRkeys_.empty()) {
       application::RdmaMemoryRegion mr =
           rdmaDeviceContext->RegisterRdmaMemoryRegionAuto(localPtr, size);
       cpuMemObj->lkey = mr.lkey;
       cpuMemObj->peerRkeys[rank] = mr.rkey;
-      bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
-      heapLkey_ = mr.lkey;
-      heapRkeys_.assign(cpuMemObj->peerRkeys, cpuMemObj->peerRkeys + worldSize);
+      if (heap_begin) {
+        heapLkey_ = mr.lkey;
+        heapRkeys_.resize(worldSize);
+      }
     } else {
       cpuMemObj->lkey = heapLkey_;
-      memcpy(cpuMemObj->peerRkeys, heapRkeys_.data(), worldSize * sizeof(uint32_t));
+      cpuMemObj->peerRkeys[rank] = heapRkeys_[rank];
     }
-  } else {
-    bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
+  }
+  bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
+  if (heap_begin && rdmaDeviceContext && anyRdmaPeer && rdmaRegister) {
+    heapRkeys_.assign(cpuMemObj->peerRkeys, cpuMemObj->peerRkeys + worldSize);
   }
 
   const auto& allCtxs = context.GetAllRdmaDeviceContexts();
