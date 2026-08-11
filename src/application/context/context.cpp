@@ -186,15 +186,12 @@ void Context::InitializeTopologyAndTransports() {
   }
   assert(rankInNode < 8);
 
-  // Init rdma context — use generic ibverbs when CPU proxy is active
+  // Init rdma context — always DirectVerbs for MR/lkey compatibility.
+  // When MORI_EP_OVER_RDMA=1, onGpu=false creates host-based QPs usable by proxy.
   const char* epOverRdmaCtx = std::getenv("MORI_EP_OVER_RDMA");
-  RdmaBackendType backend = (epOverRdmaCtx && std::string(epOverRdmaCtx) == "1")
-                                ? RdmaBackendType::IBVerbs
-                                : RdmaBackendType::DirectVerbs;
-  fprintf(stderr, "[MORI-PROXY] RDMA backend: %s (MORI_EP_OVER_RDMA=%s)\n",
-          backend == RdmaBackendType::IBVerbs ? "IBVerbs" : "DirectVerbs",
+  fprintf(stderr, "[MORI-PROXY] RDMA backend: DirectVerbs (MORI_EP_OVER_RDMA=%s)\n",
           epOverRdmaCtx ? epOverRdmaCtx : "unset");
-  rdmaContext.reset(new RdmaContext(backend));
+  rdmaContext.reset(new RdmaContext(RdmaBackendType::DirectVerbs));
   const RdmaDeviceList& devices = rdmaContext->GetRdmaDeviceList();
   ActiveDevicePortList activeDevicePortList = GetActiveDevicePortList(devices);
 
