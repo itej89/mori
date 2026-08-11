@@ -777,10 +777,12 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
     MORI_SHMEM_INFO("Proxy: {} threads started for {} NICs", states->proxyThreads.size(), numNics);
     fprintf(stderr, "[PROXY-THREADS] %zu threads for %d NICs\n", states->proxyThreads.size(), numNics);
     CopyGpuStatesToDevice(states);
+    fprintf(stderr, "[PROXY-COPY] rank=%d done\n", states->gpuStates.rank);
   }
 
   states->status = ShmemStatesStatus::Initialized;
   MORI_SHMEM_INFO("Shmem initialization completed");
+  fprintf(stderr, "[SHMEM-INIT] rank=%d complete\n", states->gpuStates.rank);
   return 0;
 }
 
