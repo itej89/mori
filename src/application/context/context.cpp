@@ -355,7 +355,7 @@ TransportType Context::DefaultPolicyResolve(const PeerCapabilities& cap, bool is
 /*  SDMA queues materialized but did not go through BuildInitialEndpoints.  */
 /* ------------------------------------------------------------------------ */
 
-void Context::EnsureSdmaTransport() {
+void Context::EnsureSdmaTransport(int requestedChannels) {
   if (sdmaSetupDone) return;
 
   // anvil global init: do it lazily here rather than at Context construction
