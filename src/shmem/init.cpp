@@ -713,12 +713,15 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
     ps.localGpuIdx = 0;
     ps.numQpPerPe = ctx->GetNumQpPerPe();
 
-    const auto& hostEndpoints = ctx->GetRdmaEndpoints();
+    auto& hostEndpoints = ctx->GetRdmaEndpoints();
+    auto* devCtx = ctx->GetRdmaDeviceContext();
     std::vector<core::ProxyQpHandle> qps(hostEndpoints.size());
     int qpCount = 0;
     for (size_t i = 0; i < hostEndpoints.size(); i++) {
       if (hostEndpoints[i].ibvHandle.qp != nullptr) {
-        qps[i] = {hostEndpoints[i].ibvHandle.qp, hostEndpoints[i].ibvHandle.cq, 0, 0};
+        qps[i] = {hostEndpoints[i].ibvHandle.qp, hostEndpoints[i].ibvHandle.cq, 0, 0,
+                   hostEndpoints[i].ibvHandle.recvBuf, hostEndpoints[i].ibvHandle.recvLkey,
+                   hostEndpoints[i].ibvHandle.recvCount};
         qpCount++;
       }
     }
