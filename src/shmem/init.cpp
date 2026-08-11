@@ -599,7 +599,7 @@ void GpuStateInit(ShmemStates* states) {
   // Check if EP-over-RDMA proxy mode is requested
   const char* proxyEnv = std::getenv("MORI_EP_OVER_RDMA");
   if (proxyEnv && (std::string(proxyEnv) == "1" || std::string(proxyEnv) == "true")) {
-    // Determine number of NICs for per-NIC ring allocation
+    auto& ps = states->proxyGpuState;
     int numNics = 1;
     if (states->rdmaStates && states->rdmaStates->commContext) {
       numNics = static_cast<int>(states->rdmaStates->commContext->GetAllRdmaDeviceContexts().size());
@@ -629,7 +629,8 @@ void GpuStateInit(ShmemStates* states) {
     ps.numRings = allocated;
     ps.numNics = numNics;
     ps.localGpuIdx = states->gpuStates.rank % numNics;
-    ps.active = true;
+    ps.active = (allocated > 0);
+    ps.numQpPerPe = states->rdmaStates->commContext->GetNumQpPerPe();
     MORI_SHMEM_INFO("Proxy: {} rings allocated for {} NICs, localGpuIdx={}",
                     allocated, numNics, ps.localGpuIdx);
   }
