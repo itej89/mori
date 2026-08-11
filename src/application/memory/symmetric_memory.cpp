@@ -202,22 +202,19 @@ SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bo
   }
   if (rdmaDeviceContext && anyRdmaPeer && rdmaRegister) {
     if (heap_begin) {
-      // Heap: register MR and exchange rkeys across all PEs
       application::RdmaMemoryRegion mr =
           rdmaDeviceContext->RegisterRdmaMemoryRegionAuto(localPtr, size);
       cpuMemObj->lkey = mr.lkey;
       cpuMemObj->peerRkeys[rank] = mr.rkey;
-      bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
-      // Cache heap rkeys for sub-allocations
-      heapLkey_ = mr.lkey;
-      heapRkeys_.assign(cpuMemObj->peerRkeys, cpuMemObj->peerRkeys + worldSize);
     } else {
-      // Sub-allocation: reuse heap's MR (same physical memory, same rkeys)
       cpuMemObj->lkey = heapLkey_;
       memcpy(cpuMemObj->peerRkeys, heapRkeys_.data(), worldSize * sizeof(uint32_t));
     }
-  } else {
-    bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
+  }
+  bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
+  if (heap_begin && rdmaDeviceContext && anyRdmaPeer && rdmaRegister) {
+    heapLkey_ = cpuMemObj->lkey;
+    heapRkeys_.assign(cpuMemObj->peerRkeys, cpuMemObj->peerRkeys + worldSize);
   }
 
   // Per-NIC MR registration for send-side routing (proxy mode).
