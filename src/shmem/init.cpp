@@ -735,6 +735,9 @@ int ShmemInit(application::BootstrapNetwork* bootNet) {
     }
     fprintf(stderr, "[MORI-PROXY] %zu thread(s) started, active=%d\n",
             states->proxyThreads.size(), (int)states->proxyGpuState.active);
+    CopyGpuStatesToDevice(states);
+    fprintf(stderr, "[MORI-PROXY] ProxyGpuState copied to device (active=%d)\n",
+            (int)states->proxyGpuState.active);
   } else {
     fprintf(stderr, "[MORI-PROXY] DISABLED — using native IBGDA path\n");
   }
