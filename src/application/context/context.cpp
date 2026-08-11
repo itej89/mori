@@ -245,19 +245,21 @@ void Context::InitializeTopologyAndTransports() {
                   devicePortId, device->Name());
   }
 
-  allRdmaDeviceContexts.clear();
-  for (const auto& dp : activeDevicePortList) {
-    RdmaDeviceContext* ctx = dp.first->CreateRdmaDeviceContext();
-    if (ctx != nullptr) {
-      allRdmaDeviceContexts.emplace_back(ctx);
+  // Build per-rail device contexts only when multiple NICs are present.
+  // On single-NIC setups (CX7) creating extra contexts wastes GPU resources
+  // and can interfere with IBGDA. The rail-affinity code below falls back to
+  // rdmaDeviceContext when allRdmaDeviceContexts is empty or size==1.
+  if (activeDevicePortList.size() > 1) {
+    allRdmaDeviceContexts.clear();
+    for (const auto& dp : activeDevicePortList) {
+      RdmaDeviceContext* ctx = dp.first->CreateRdmaDeviceContext();
+      if (ctx != nullptr) {
+        allRdmaDeviceContexts.emplace_back(ctx);
+      }
     }
+    MORI_APP_INFO("rank {} allRdmaDeviceContexts size: {}", LocalRank(),
+                  allRdmaDeviceContexts.size());
   }
-  if (allRdmaDeviceContexts.empty() && rdmaDeviceContext) {
-    allRdmaDeviceContexts.emplace_back(
-        rdmaDeviceContext->GetRdmaDevice()->CreateRdmaDeviceContext());
-  }
-  MORI_APP_INFO("rank {} allRdmaDeviceContexts size: {}", LocalRank(),
-                allRdmaDeviceContexts.size());
 
   int numQpPerPe = 4;
   const char* envNumQp = std::getenv("MORI_NUM_QP_PER_PE");
@@ -401,7 +403,7 @@ void Context::BuildAndConnectInitialEndpoints() {
   // ionic_N can only reach remote ionic_N. Both sides use a symmetric formula
   // — max(myLocalGpu, peerLocalGpu) — so both sides agree. On non-rail-isolated
   // fabrics (e.g. CX7) allRdmaDeviceContexts has 1 entry and behaviour is unchanged.
-  const int numRailContexts = static_cast<int>(allRdmaDeviceContexts.size());
+  const int numRailContexts = std::max(1, static_cast<int>(allRdmaDeviceContexts.size()));
   const int myLocalGpu = LocalRankInNode();
   rdmaEps.reserve(static_cast<size_t>(WorldSize()) * numQpPerPe);
   for (int i = 0; i < WorldSize(); i++) {
