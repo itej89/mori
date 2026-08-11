@@ -201,12 +201,57 @@ SymmMemObjPtr SymmMemManager::RegisterSymmMemObj(void* localPtr, size_t size, bo
   // node-block. The rkey stays 0 and the Allgather below still runs, so the
   // collective register stays in lockstep.
   if (rdmaDeviceContext && anyRdmaPeer && rdmaRegister) {
-    application::RdmaMemoryRegion mr =
-        rdmaDeviceContext->RegisterRdmaMemoryRegionAuto(localPtr, size);
-    cpuMemObj->lkey = mr.lkey;
-    cpuMemObj->peerRkeys[rank] = mr.rkey;
+    if (heap_begin) {
+      // Heap: register MR and exchange rkeys across all PEs
+      application::RdmaMemoryRegion mr =
+          rdmaDeviceContext->RegisterRdmaMemoryRegionAuto(localPtr, size);
+      cpuMemObj->lkey = mr.lkey;
+      cpuMemObj->peerRkeys[rank] = mr.rkey;
+      bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
+      // Cache heap rkeys for sub-allocations
+      heapLkey_ = mr.lkey;
+      heapRkeys_.assign(cpuMemObj->peerRkeys, cpuMemObj->peerRkeys + worldSize);
+    } else if (!heapRkeys_.empty()) {
+      // Sub-allocation: reuse heap's MR (same physical memory, same rkeys)
+      cpuMemObj->lkey = heapLkey_;
+      memcpy(cpuMemObj->peerRkeys, heapRkeys_.data(), worldSize * sizeof(uint32_t));
+      // Allgather still runs unconditionally to avoid collective deadlock
+      bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
+    } else {
+      // No cached heap rkeys yet — do full registration
+      application::RdmaMemoryRegion mr =
+          rdmaDeviceContext->RegisterRdmaMemoryRegionAuto(localPtr, size);
+      cpuMemObj->lkey = mr.lkey;
+      cpuMemObj->peerRkeys[rank] = mr.rkey;
+      bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
+    }
+  } else {
+    // No RDMA peers or rdmaRegister=false — Allgather still runs to stay in lockstep
+    bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
   }
-  bootNet.Allgather(&cpuMemObj->peerRkeys[rank], cpuMemObj->peerRkeys, sizeof(uint32_t));
+
+  // Per-NIC MR registration for send-side routing (proxy mode).
+  // Register the buffer on each NIC's PD and exchange rkeys.
+  const auto& allCtxs = context.GetAllRdmaDeviceContexts();
+  int numNics = static_cast<int>(allCtxs.size());
+  // Per-NIC MR registration only for the heap (heap_begin=true).
+  // Sub-allocations within the heap share the heap's MR — re-registering
+  // them wastes time (8 barriers x 8 Allgathers per call) and overwrites
+  // the heap's perNicLkeys/perNicPeerRkeys with sub-allocation keys.
+  if (numNics > 1 && anyRdmaPeer && heap_begin) {
+    perNicLkeys.resize(numNics, 0);
+    perNicPeerRkeys.resize(numNics);
+    for (int n = 0; n < numNics; n++) {
+      bootNet.Barrier();
+      perNicPeerRkeys[n].resize(worldSize, 0);
+      if (allCtxs[n]) {
+        auto mr = allCtxs[n]->RegisterRdmaMemoryRegionAuto(localPtr, size);
+        perNicLkeys[n] = mr.lkey;
+        perNicPeerRkeys[n][rank] = mr.rkey;
+      }
+      bootNet.Allgather(&perNicPeerRkeys[n][rank], perNicPeerRkeys[n].data(), sizeof(uint32_t));
+    }
+  }
 
   // Copy memory object to GPU memory, we need to access it from GPU directly
   SymmMemObj* gpuMemObj;
