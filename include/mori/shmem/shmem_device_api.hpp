@@ -181,13 +181,6 @@ inline __device__ void ShmemPutMemNbiThread(
     const application::SymmMemObjPtr source, size_t sourceOffset, size_t bytes, int pe,
     int qpId = 0) {
   if (GetGlobalProxyStatePtr()->active) {
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-      static __device__ int once = 0;
-      if (atomicCAS(&once, 0, 1) == 0) {
-        printf("[MORI-PROXY-GPU] PutMemNbi proxy path taken! pe=%d bytes=%zu ring=%p\n",
-               pe, bytes, (void*)GetGlobalProxyStatePtr()->rings[0]);
-      }
-    }
     ShmemPutMemNbiThreadKernelImpl_proxy<core::ProviderType::PSD>(
         dest, destOffset, source, sourceOffset, bytes, pe, qpId);
     return;

@@ -81,6 +81,12 @@ class SymmMemManager {
   SymmMemObjPtr GetVMMHeapObj() const { return vmmHeapObj; }
   size_t GetVMMChunkSize() const { return vmmChunkSize; }
 
+  std::vector<uint32_t> perNicLkeys;
+  std::vector<std::vector<uint32_t>> perNicPeerRkeys;
+
+  uint32_t heapLkey_{0};
+  std::vector<uint32_t> heapRkeys_;
+
   // Common Utilities
   SymmMemObjPtr Get(void* localPtr) const;
   HeapVAManager* GetHeapVAManager() const { return heapVAManager.get(); }
