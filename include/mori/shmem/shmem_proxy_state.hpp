@@ -17,9 +17,5 @@ struct ProxyGpuState {
   int numQpPerPe{4};
 };
 
-extern __device__ __attribute__((visibility("default"))) ProxyGpuState globalProxyState;
-
-static __device__ ProxyGpuState* GetGlobalProxyStatePtr() { return &globalProxyState; }
-
 }  // namespace shmem
 }  // namespace mori
