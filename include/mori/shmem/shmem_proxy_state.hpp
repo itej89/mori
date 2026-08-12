@@ -2,15 +2,17 @@
 // MIT License
 #pragma once
 
-#include "mori/core/transport/rdma/proxy/proxy_types.hpp"
+#include <cstdint>
 
 namespace mori {
 namespace shmem {
 
+static constexpr int PROXY_STATE_MAX_NICS = 8;
+
 struct ProxyGpuState {
   bool active{false};
-  ::mori::core::ProxyRing* rings[::mori::core::PROXY_MAX_NICS]{};
-  uint32_t quietHead[::mori::core::PROXY_MAX_NICS]{};
+  void* rings[PROXY_STATE_MAX_NICS]{};
+  uint32_t quietHead[PROXY_STATE_MAX_NICS]{};
   int numRings{0};
   int numNics{0};
   int localGpuIdx{0};
