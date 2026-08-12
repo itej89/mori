@@ -618,6 +618,7 @@ void GpuStateInit(ShmemStates* states) {
         if (regErr == hipSuccess) {
           memset(ring, 0, sizeof(core::ProxyRing));
           states->gpuStates.proxyRings[n] = ring;
+          states->proxyGpuState.rings[n] = static_cast<void*>(ring);
           allocated++;
         } else {
           free(ringPtr);
@@ -625,9 +626,14 @@ void GpuStateInit(ShmemStates* states) {
       }
     }
     states->gpuStates.numProxyRings = allocated;
+    states->proxyGpuState.numRings = allocated;
     states->gpuStates.numNics = numNics;
     states->gpuStates.localGpuIdx = states->gpuStates.rank % numNics;
+    states->proxyGpuState.numNics = numNics;
     states->gpuStates.useProxy = true;
+    states->proxyGpuState.active = true;
+    states->proxyGpuState.localGpuIdx = states->gpuStates.rank % numNics;
+    states->proxyGpuState.numQpPerPe = states->rdmaStates->commContext->GetNumQpPerPe();
     MORI_SHMEM_INFO("Proxy: {} rings allocated for {} NICs, localGpuIdx={}",
                     allocated, numNics, states->gpuStates.localGpuIdx);
   }
