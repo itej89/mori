@@ -128,6 +128,7 @@ struct GpuStates {
   uintptr_t heapEndAddr{0};                   // End address of symmetric heap (base + size)
   application::SymmMemObj* heapObj{nullptr};  // Pointer to the heap's SymmMemObj on device
   uint64_t* internalSyncPtr{nullptr};         // Pointer to the internal synchronization object
+
 };
 
 // Changed from __constant__ to __device__ to allow hipMemcpyToSymbol updates (like rocshmem)
@@ -154,6 +155,15 @@ struct RemoteAddrInfo {
 
 #if !defined(__HIPCC__) && !defined(__CUDACC__)
 
+#include <memory>
+
+}  // namespace shmem
+}  // namespace mori
+#include "mori/shmem/shmem_proxy_state.hpp"
+namespace mori {
+namespace core { class ProxyThread; }
+namespace shmem {
+
 enum ShmemStatesStatus {
   New = 0,
   Initialized = 1,
@@ -179,6 +189,8 @@ struct ShmemStates {
   MemoryStates* memoryStates{nullptr};
   ModuleStates moduleStates;  // JIT module state for this GPU
   GpuStates gpuStates;        // host-side copy of device GpuStates for this GPU
+  ProxyGpuState proxyGpuState;
+  std::vector<std::unique_ptr<core::ProxyThread>> proxyThreads;  // per-NIC CPU proxy threads
 
   // Asserts that ShmemInit has been called and the slot is currently usable.
   // Used by APIs that touch GPU state (allocation, barrier, module init)
