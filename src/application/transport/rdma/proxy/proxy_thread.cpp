@@ -145,6 +145,7 @@ bool ProxyThread::BuildWr(volatile ProxyCmd* cmd, ProxyQpHandle& qph,
 
 void ProxyThread::MainLoop() {
   hipSetDevice(gpu_id_);
+  bool first_trace = true;
 
   static constexpr int kMaxBatch = 64;
   ibv_send_wr wrs[kMaxBatch];
@@ -165,7 +166,12 @@ void ProxyThread::MainLoop() {
       if (cmd->status != PROXY_PENDING) break;
 
       uint32_t qi = cmd->qp_idx;
+      if (first_trace) {
+        fprintf(stderr, "[MoRI-DBG] ProxyThread gpu=%d: first cmd op=%u qp_idx=%u\n", gpu_id_, cmd->op, qi);
+        first_trace = false;
+      }
       if (qi >= qps_.size() || qps_[qi].qp == nullptr) {
+        fprintf(stderr, "[MoRI-DBG] ProxyThread gpu=%d: NULL QP for qp_idx=%u (qps_.size=%zu)\n", gpu_id_, qi, qps_.size());
         cmd->status = PROXY_ERROR;
         next_slot_++;
         continue;
