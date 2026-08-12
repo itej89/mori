@@ -130,12 +130,14 @@ struct GpuStates {
   application::SymmMemObj* heapObj{nullptr};  // Pointer to the heap's SymmMemObj on device
   uint64_t* internalSyncPtr{nullptr};         // Pointer to the internal synchronization object
 
+#if !defined(__HIPCC__) || defined(MORI_PROXY_ENABLED)
   bool useProxy{false};
   core::ProxyRing* proxyRings[core::PROXY_MAX_NICS]{};
   uint32_t proxyQuietHead[core::PROXY_MAX_NICS]{};
   int numProxyRings{0};
   int numNics{0};
   int localGpuIdx{0};
+#endif
 };
 
 // Changed from __constant__ to __device__ to allow hipMemcpyToSymbol updates (like rocshmem)
