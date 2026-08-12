@@ -17,9 +17,8 @@ struct ProxyGpuState {
   int numQpPerPe{4};
 };
 
-extern __device__ __attribute__((visibility("default"))) ProxyGpuState globalProxyState;
-
-static __device__ ProxyGpuState* GetGlobalProxyStatePtr() { return &globalProxyState; }
+// Device symbol and accessor declared in device-only context
+// (shmem_device_api.hpp / ep_common.hip) to avoid host linker issues.
 
 }  // namespace shmem
 }  // namespace mori
