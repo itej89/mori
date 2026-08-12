@@ -32,6 +32,7 @@ namespace mori {
 namespace shmem {
 
 #ifdef __HIPCC__
+#ifdef MORI_PROXY_ENABLED
 inline __device__ volatile core::ProxyRing* ProxyRingForEp(
     GpuStates* gs, uint32_t epIndex) {
   int pe = epIndex / gs->numQpPerPe;
@@ -39,6 +40,7 @@ inline __device__ volatile core::ProxyRing* ProxyRingForEp(
   int nicIdx = (gs->localGpuIdx > peerLocal ? gs->localGpuIdx : peerLocal) % gs->numNics;
   return gs->proxyRings[nicIdx];
 }
+#endif
 #endif
 
 #ifdef MORI_DEVICE_NIC_BNXT
@@ -270,6 +272,7 @@ inline __device__ void ShmemQuietThreadKernelPsdImpl(int pe, int qpId) {
   GpuStates* globalGpuStates = GetGlobalGpuStatesPtr();
 
   // Proxy path: wait only for ops posted since the last quiet.
+#ifdef MORI_PROXY_ENABLED
   if (globalGpuStates->useProxy && globalGpuStates->numProxyRings > 0) {
     for (int n = 0; n < globalGpuStates->numProxyRings; n++) {
       volatile core::ProxyRing* ring = globalGpuStates->proxyRings[n];
@@ -282,6 +285,7 @@ inline __device__ void ShmemQuietThreadKernelPsdImpl(int pe, int qpId) {
     }
     return;
   }
+#endif
 
   const int epIndex = pe * globalGpuStates->numQpPerPe + (qpId % globalGpuStates->numQpPerPe);
   core::WorkQueueHandle& wqHandle = globalGpuStates->rdmaEndpoints[epIndex].wqHandle;
@@ -574,6 +578,7 @@ inline __device__ void ShmemPutMemNbiThreadKernelImpl(const application::SymmMem
                 threadIdx.x, remaining, transfer_size);
 
     // Proxy path: bypass IBGDA, use per-NIC CPU proxy thread for RDMA posting
+#ifdef MORI_PROXY_ENABLED
     if (globalGpuStates->useProxy && globalGpuStates->numProxyRings > 0) {
       volatile core::ProxyRing* ring = ProxyRingForEp(globalGpuStates, epIndex);
       core::ProxyPostWrite(ring, epIndex,
@@ -582,6 +587,7 @@ inline __device__ void ShmemPutMemNbiThreadKernelImpl(const application::SymmMem
       currentOffset += transfer_size;
       continue;
     }
+#endif
 
     // Post RDMA write (unified code for both fast and slow paths)
     uint32_t warp_sq_counter{0};
@@ -764,6 +770,7 @@ inline __device__ void ShmemPutSizeImmNbiThreadKernelImpl(const application::Sym
     rkey = dest->peerRkeys[pe];
   }
   // Proxy path for inline writes
+#ifdef MORI_PROXY_ENABLED
   if (globalGpuStates->useProxy && globalGpuStates->numProxyRings > 0) {
     int epIndex = pe * globalGpuStates->numQpPerPe + (qpId % globalGpuStates->numQpPerPe);
     volatile core::ProxyRing* ring = ProxyRingForEp(globalGpuStates, epIndex);
@@ -771,6 +778,7 @@ inline __device__ void ShmemPutSizeImmNbiThreadKernelImpl(const application::Sym
                                reinterpret_cast<uint64_t>(val), 0, raddr, rkey, bytes);
     return;
   }
+#endif
 
   ShmemRdmaEndpoint* ep = globalGpuStates->rdmaEndpoints;
   int epIndex = pe * globalGpuStates->numQpPerPe + (qpId % globalGpuStates->numQpPerPe);
@@ -912,6 +920,7 @@ inline __device__ void ShmemPutMemNbiSignalThreadKernelImpl(
   GpuStates* globalGpuStates = GetGlobalGpuStatesPtr();
 
   // Proxy path: data write + signal as two proxy commands on the same NIC ring
+#ifdef MORI_PROXY_ENABLED
   if (globalGpuStates->useProxy && globalGpuStates->numProxyRings > 0) {
     int epIndex = pe * globalGpuStates->numQpPerPe + (qpId % globalGpuStates->numQpPerPe);
     volatile core::ProxyRing* ring = ProxyRingForEp(globalGpuStates, epIndex);
@@ -929,6 +938,7 @@ inline __device__ void ShmemPutMemNbiSignalThreadKernelImpl(
                                ibuf.lkey, ibuf.addr);
     return;
   }
+#endif
 
   ShmemRdmaEndpoint* ep = globalGpuStates->rdmaEndpoints;
   int epIndex = pe * globalGpuStates->numQpPerPe + (qpId % globalGpuStates->numQpPerPe);
@@ -1295,6 +1305,7 @@ inline __device__ void ShmemAtomicSizeNonFetchThreadKernelImpl(
   }
 
   // Proxy path for non-fetch atomic
+#ifdef MORI_PROXY_ENABLED
   if (globalGpuStates->useProxy && globalGpuStates->numProxyRings > 0) {
     int epIndex = pe * globalGpuStates->numQpPerPe + (qpId % globalGpuStates->numQpPerPe);
     volatile core::ProxyRing* ring = ProxyRingForEp(globalGpuStates, epIndex);
@@ -1305,6 +1316,7 @@ inline __device__ void ShmemAtomicSizeNonFetchThreadKernelImpl(
                                   raddr, rkey, atomicVal, ibuf.lkey, ibuf.addr);
     return;
   }
+#endif
 
   ShmemRdmaEndpoint* ep = globalGpuStates->rdmaEndpoints;
   int epIndex = pe * globalGpuStates->numQpPerPe + (qpId % globalGpuStates->numQpPerPe);
@@ -1472,6 +1484,7 @@ inline __device__ T ShmemAtomicTypeFetchThreadKernelImpl(const application::Symm
   GpuStates* globalGpuStates = GetGlobalGpuStatesPtr();
 
   // Proxy path for fetch atomic
+#ifdef MORI_PROXY_ENABLED
   if (globalGpuStates->useProxy && globalGpuStates->numProxyRings > 0) {
     int epIndex = pe * globalGpuStates->numQpPerPe + (qpId % globalGpuStates->numQpPerPe);
     volatile core::ProxyRing* ring = ProxyRingForEp(globalGpuStates, epIndex);
@@ -1494,6 +1507,7 @@ inline __device__ T ShmemAtomicTypeFetchThreadKernelImpl(const application::Symm
     memcpy(&retVal, &result, sizeof(T));
     return retVal;
   }
+#endif
 
   ShmemRdmaEndpoint* ep = globalGpuStates->rdmaEndpoints;
   int epIndex = pe * globalGpuStates->numQpPerPe + (qpId % globalGpuStates->numQpPerPe);
