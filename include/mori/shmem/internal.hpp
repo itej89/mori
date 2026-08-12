@@ -165,11 +165,6 @@ struct RemoteAddrInfo {
 #include <memory>
 
 }  // namespace shmem
-}  // namespace mori
-
-#include "mori/shmem/shmem_proxy_state.hpp"
-
-namespace mori {
 namespace core { class ProxyThread; }
 namespace shmem {
 
