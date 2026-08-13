@@ -179,7 +179,9 @@ int ShmemModuleInit(void* hipModule) {
     if (perr == hipSuccess && moduleProxyAddr != nullptr) {
       HIP_RUNTIME_CHECK(hipMemcpy(moduleProxyAddr, &states->proxyGpuStates,
                                   sizeof(ProxyGpuStates), hipMemcpyHostToDevice));
+      fprintf(stderr, "[v9] ShmemModuleInit: proxy state copied, numRings=%d\n", states->proxyGpuStates.numRings);
     } else {
+      fprintf(stderr, "[v9] ShmemModuleInit: proxy symbol NOT FOUND err=%d\n", perr);
     }
   }
 
