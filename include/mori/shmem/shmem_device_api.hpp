@@ -99,12 +99,10 @@ namespace shmem {
 /* ---------------------------------------------------------------------------------------------- */
 inline __device__ void ShmemQuietThread() {
 #ifdef MORI_PROXY_ENABLED
-  GpuStates* gs = GetGlobalGpuStatesPtr();
-  for (int pe = 0; pe < gs->worldSize; pe++) {
-    if (pe != gs->rank && gs->transportTypes[pe] == application::TransportType::PROXY) {
-      ShmemQuietThreadKernel<application::TransportType::PROXY>();
-      return;
-    }
+  ProxyGpuStates* ps = GetGlobalProxyStatePtr();
+  if (ps->numRings > 0) {
+    ShmemQuietThreadKernel<application::TransportType::PROXY>();
+    return;
   }
 #endif
   ShmemQuietThreadKernel<application::TransportType::RDMA>();
