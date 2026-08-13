@@ -635,6 +635,8 @@ void GpuStateInit(ShmemStates* states) {
   }
 
 
+  fprintf(stderr, "[v9] GpuStateInit: proxy=%d rank=%d\n",
+          states->rdmaStates->commContext->IsProxyEnabled(), states->gpuStates.rank);
   // Copy communication metadata to GPU — override RDMA → PROXY when proxy active
   if (states->rdmaStates->commContext->IsProxyEnabled()) {
     int worldSize = states->bootStates->worldSize;

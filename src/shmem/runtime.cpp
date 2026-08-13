@@ -114,6 +114,7 @@ void CopyGpuStatesToDevice(ShmemStates* states) {
 
   if (states->rdmaStates->commContext->IsProxyEnabled()) {
     const ProxyGpuStates* proxyStates = &states->proxyGpuStates;
+    fprintf(stderr, "[v9] CopyGpuStates: copying proxy state, numRings=%d\n", proxyStates->numRings);
     if (ms.module != nullptr) {
       ProxyGpuStates* deviceProxyPtr = nullptr;
       size_t symbolSize = 0;
