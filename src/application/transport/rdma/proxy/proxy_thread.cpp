@@ -165,7 +165,12 @@ void ProxyThread::MainLoop() {
       if (cmd->status != PROXY_PENDING) break;
 
       uint32_t qi = cmd->qp_idx;
+      if (ops_posted_ == 0)
+        fprintf(stderr, "[v8] ProxyThread gpu=%d: first cmd op=%u qi=%u qps_size=%zu has_qp=%d\n",
+                gpu_id_, cmd->op, qi, qps_.size(), (qi < qps_.size() && qps_[qi].qp != nullptr));
       if (qi >= qps_.size() || qps_[qi].qp == nullptr) {
+        if (ops_posted_ < 3)
+          fprintf(stderr, "[v8] ProxyThread gpu=%d: NULL QP qi=%u qps_size=%zu\n", gpu_id_, qi, qps_.size());
         cmd->status = PROXY_ERROR;
         next_slot_++;
         continue;
