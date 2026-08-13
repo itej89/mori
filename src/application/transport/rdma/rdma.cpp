@@ -658,6 +658,8 @@ ActiveDevicePortList GetActiveDevicePortList(const RdmaDeviceList& devices) {
       activeDevPortList.push_back({device, port});
     }
   }
+  std::sort(activeDevPortList.begin(), activeDevPortList.end(),
+            [](const auto& a, const auto& b) { return a.first->Name() < b.first->Name(); });
   return activeDevPortList;
 }
 
