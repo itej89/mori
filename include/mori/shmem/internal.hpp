@@ -137,6 +137,7 @@ struct GpuStates {
   int numProxyRings{0};
   int numNics{0};
   int localGpuIdx{0};
+  uint32_t proxyRingHits[core::PROXY_MAX_NICS]{};
 };
 
 // Changed from __constant__ to __device__ to allow hipMemcpyToSymbol updates (like rocshmem)

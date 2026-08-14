@@ -804,6 +804,17 @@ bool ShmemIsInitialized() {
 /* ---------------------------------------------------------------------------------------------- */
 
 static void FinalizeGpuStates(ShmemStates* states) {
+  // Print GPU-side ring hit counters before shutdown
+  if (states->gpuStates.numProxyRings > 0 && states->moduleStates.gpuStatesPtr) {
+    GpuStates devCopy{};
+    hipMemcpy(&devCopy, states->moduleStates.gpuStatesPtr, sizeof(GpuStates), hipMemcpyDeviceToHost);
+    fprintf(stderr, "[GPU-RING-HITS] rank=%d rings=[", states->gpuStates.rank);
+    for (int n = 0; n < states->gpuStates.numNics; n++) {
+      fprintf(stderr, "nic%d:%u ", n, devCopy.proxyRingHits[n]);
+    }
+    fprintf(stderr, "]\n");
+  }
+
   // Shutdown all per-NIC proxy threads before freeing rings
   for (auto& t : proxyThreads) {
     if (t) t->Shutdown();

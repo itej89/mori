@@ -15,6 +15,7 @@ inline __device__ volatile core::ProxyRing* ProxyRingForEp(
   int pe = epIndex / gs->numQpPerPe;
   int peerLocal = pe % gs->numNics;
   int nicIdx = (gs->localGpuIdx > peerLocal ? gs->localGpuIdx : peerLocal) % gs->numNics;
+  __hip_atomic_fetch_add(&gs->proxyRingHits[nicIdx], 1u, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
   return gs->proxyRings[nicIdx];
 }
 
