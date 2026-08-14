@@ -81,15 +81,12 @@ void ProxyThread::DrainCq(ProxyQpHandle& qph) {
       } else {
         if (first_error_logged_ < 5) {
           volatile ProxyCmd* cmd = &ring_->cmds[slot];
-          ibv_qp_attr qp_attr{};
-          ibv_qp_init_attr qp_init_attr{};
-          ibv_query_qp(qph.qp, &qp_attr, IBV_QP_STATE, &qp_init_attr);
           fprintf(stderr, "proxy: CQE error gpu=%d slot=%u status=%d (%s) wr_id=%lu qpn=%u "
-                  "op=%u dst=0x%lx len=%u rkey=0x%x lkey=0x%x qp_state=%d\n",
+                  "op=%u qp_idx=%u dst=0x%lx src=0x%lx len=%u rkey=0x%x lkey=0x%x\n",
                   gpu_id_, slot, wc[i].status, ibv_wc_status_str(wc[i].status), wc[i].wr_id,
                   qph.qp ? qph.qp->qp_num : 0,
-                  cmd->op, cmd->dst_addr, cmd->length, cmd->rkey, cmd->lkey,
-                  qp_attr.qp_state);
+                  cmd->op, cmd->qp_idx, cmd->dst_addr, cmd->src_addr,
+                  cmd->length, cmd->rkey, cmd->lkey);
           first_error_logged_++;
         }
         ring_->cmds[slot].status = PROXY_ERROR;
