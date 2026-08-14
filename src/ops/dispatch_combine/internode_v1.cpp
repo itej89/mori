@@ -886,8 +886,6 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
 
   // v2: iterate over remote PEs instead of nodes
   int numRemotePes = npes - config.gpuPerNode;
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
-  }
   int totalBids = 0;
   for (int bid = blockId; bid < numRecvBlock * maxChunkNum * numRemotePes;
        bid += args.rdmaBlockNum) {
@@ -1005,8 +1003,6 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
     batchStart += currentBatchSize;
   }
 
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
-  }
   __threadfence_system();
 
   int finishedWarp = 0;
@@ -1035,14 +1031,6 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
 
     // v2: wait for all remote PEs
     uint64_t* localBarrierPtr = args.crossDeviceBarrierMemObj->template GetAs<uint64_t*>();
-    if (laneId == 0) {
-             myPe, barrierFlag, barrierFlag * config.numQpPerPe);
-      for (int p = 0; p < npes; p++) {
-        if (p / config.gpuPerNode != myNode) {
-                 myPe, p, core::AtomicLoadRelaxedSystem(localBarrierPtr + p));
-        }
-      }
-    }
     for (int pe = laneId; pe < npes; pe += warpSize) {
       if (pe / config.gpuPerNode != myNode) {
         while (core::AtomicLoadRelaxedSystem(localBarrierPtr + pe) !=
