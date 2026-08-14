@@ -1041,6 +1041,16 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
 
     // v2: wait for all remote PEs
     uint64_t* localBarrierPtr = args.crossDeviceBarrierMemObj->template GetAs<uint64_t*>();
+    if (laneId == 0) {
+      printf("[V2-BARRIER] rank=%d barrierFlag=%lu expected=%lu\n",
+             myPe, barrierFlag, barrierFlag * config.numQpPerPe);
+      for (int p = 0; p < npes; p++) {
+        if (p / config.gpuPerNode != myNode) {
+          printf("[V2-BARRIER] rank=%d wait pe=%d cur=%lu\n",
+                 myPe, p, core::AtomicLoadRelaxedSystem(localBarrierPtr + p));
+        }
+      }
+    }
     for (int pe = laneId; pe < npes; pe += warpSize) {
       if (pe / config.gpuPerNode != myNode) {
         while (core::AtomicLoadRelaxedSystem(localBarrierPtr + pe) !=
