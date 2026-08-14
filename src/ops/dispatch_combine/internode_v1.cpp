@@ -890,6 +890,9 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
 
   // v2: iterate over remote PEs instead of nodes
   int numRemotePes = npes - config.gpuPerNode;
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    printf("[V2-COMBINE] rank=%d numRemotePes=%d maxChunkNum=%d\n", myPe, numRemotePes, maxChunkNum);
+  }
   int totalBids = 0;
   for (int bid = blockId; bid < numRecvBlock * maxChunkNum * numRemotePes;
        bid += args.rdmaBlockNum) {
@@ -1007,9 +1010,9 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
     batchStart += currentBatchSize;
   }
 
-  // Ensure all prior writes (in particular zeroing interNodeChunkFlagMemObj) are visible
-  // to other nodes before participating in the cross-device barrier, so a remote node
-  // never observes a non-zero flag that is subsequently overwritten with zero
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    printf("[V2-COMBINE] rank=%d chunks done, entering barrier\n", myPe);
+  }
   __threadfence_system();
 
   int finishedWarp = 0;
