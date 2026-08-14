@@ -79,6 +79,10 @@ inline __device__ void ShmemPutMemNbiThreadKernel<application::TransportType::PR
     int qpId) {
   if (bytes == 0) return;
   GpuStates* gs = GetGlobalGpuStatesPtr();
+  if (pe < 0 || pe >= gs->worldSize) {
+    printf("[PROXY-BAD-PE] gpu=%d pe=%d ws=%d\n", gs->localGpuIdx, pe, gs->worldSize);
+    return;
+  }
   int epIndex = pe * gs->numQpPerPe + (qpId % gs->numQpPerPe);
   volatile core::ProxyRing* ring = ProxyRingForEp(gs, epIndex);
 
