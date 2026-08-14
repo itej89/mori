@@ -148,7 +148,7 @@ __device__ void EpDispatchInterNodeKernel_body(EpDispatchCombineArgs<T> args) {
   const int startIdx = localBlockId * baseChunk + min(localBlockId, remainder);
   const int endIdx = startIdx + myChunkSize;
   if (localBlockId == 0 && warpId == warpNum - 1) {
-    if (laneId == 0 && destNode != myNode && args.crossDeviceBarrierFlag[0] == 0) {
+    if (laneId == 0 && destNode != myNode) {
       printf("[EP-ROUTE] rank=%d destPe=%d destLocal=%d tokens=%d\n",
              myPe, destPe, destPe % MAX_GPUS_PER_NODE, totalTokens);
     }

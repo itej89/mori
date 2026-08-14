@@ -3,7 +3,7 @@
 //
 // Common includes, shims, and wrapper macros shared by dispatch/combine kernel files.
 // Not compiled directly — included by ep_*.hip kernel files.
-// investigation: force JIT recompile for hop counting
+// investigation: force JIT recompile v2
 
 #pragma once
 
