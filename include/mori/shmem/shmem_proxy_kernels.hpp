@@ -15,13 +15,7 @@ inline __device__ volatile core::ProxyRing* ProxyRingForEp(
   int pe = epIndex / gs->numQpPerPe;
   int peerLocal = pe % gs->numNics;
   int nicIdx = (gs->localGpuIdx > peerLocal ? gs->localGpuIdx : peerLocal) % gs->numNics;
-  __hip_atomic_fetch_add(&gs->proxyRingHits[nicIdx], 1u, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-  volatile core::ProxyRing* ring = gs->proxyRings[nicIdx];
-  if (!ring) {
-    printf("[PROXY-NULL-RING] gpu=%d pe=%d peerLocal=%d nicIdx=%d epIndex=%u\n",
-           gs->localGpuIdx, pe, peerLocal, nicIdx, epIndex);
-  }
-  return ring;
+  return gs->proxyRings[nicIdx];
 }
 
 inline __device__ void ShmemQuietAllProxy() {
@@ -79,10 +73,6 @@ inline __device__ void ShmemPutMemNbiThreadKernel<application::TransportType::PR
     int qpId) {
   if (bytes == 0) return;
   GpuStates* gs = GetGlobalGpuStatesPtr();
-  if (pe < 0 || pe >= gs->worldSize) {
-    printf("[PROXY-BAD-PE] gpu=%d pe=%d ws=%d\n", gs->localGpuIdx, pe, gs->worldSize);
-    return;
-  }
   int epIndex = pe * gs->numQpPerPe + (qpId % gs->numQpPerPe);
   volatile core::ProxyRing* ring = ProxyRingForEp(gs, epIndex);
 
