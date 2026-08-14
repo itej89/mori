@@ -195,6 +195,11 @@ void ProxyThread::MainLoop() {
 
       wr_qp[batch_count] = qi;
       wrs[batch_count].next = nullptr;
+      if (ops_posted_ < 3) {
+        fprintf(stderr, "[POST-DBG] gpu=%d slot=%u qi=%u op=%u dst=0x%lx src=0x%lx len=%u rkey=0x%x lkey=0x%x\n",
+                gpu_id_, next_slot_ & PROXY_RING_MASK, qi, cmd->op, cmd->dst_addr, cmd->src_addr,
+                cmd->length, cmd->rkey, cmd->lkey);
+      }
       next_slot_++;
       batch_count++;
     }
