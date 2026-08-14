@@ -162,8 +162,10 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
   int endTokenIdx = std::min(startTokenIdx + blockChunkNum * warpSize, args.curRankNumToken);
 
   // Send to remote PEs directly (v2 direct-to-expert routing)
-  // Outer loop iterates over remote PEs, not nodes.
-  // Each token is sent directly to the PE that owns its expert.
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    printf("[V2-SEND] rank=%d startTok=%d endTok=%d npes=%d warpNum=%d\n",
+           myPe, startTokenIdx, endTokenIdx, npes, warpNum);
+  }
   for (int remotePe = warpId; remotePe < npes; remotePe += warpNum) {
     int remoteNode = remotePe / config.gpuPerNode;
     if (remoteNode == myNode) continue;
@@ -275,17 +277,15 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
   if (laneId == 0) finishedWarp = atomicAdd(args.interNodeBlocksBarrier, 1);
   finishedWarp = __shfl(finishedWarp, 0);
   if ((finishedWarp + 1) == (args.rdmaBlockNum * warpNum)) {
-    // Signal each remote PE with total token count
+    // Signal each remote PE with total token count (always signal, even 0 tokens)
     for (int lane = laneId; lane < npes; lane += warpSize) {
       int remoteNode = lane / config.gpuPerNode;
       if (remoteNode == myNode) continue;
       index_t numTokenSignal =
           core::AtomicLoadRelaxed(args.blockFlagCounter + lane) * warpSize + 1;
-      if (numTokenSignal > 1) {
-        shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.nodeRecvTokenNumMemObj,
-                                                       myPe * sizeof(uint64_t), numTokenSignal,
-                                                       core::AMO_ADD, lane);
-      }
+      shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.nodeRecvTokenNumMemObj,
+                                                     myPe * sizeof(uint64_t), numTokenSignal,
+                                                     core::AMO_ADD, lane);
     }
     if (laneId == 0) args.interNodeBlocksBarrier[0] = 0;
   }
