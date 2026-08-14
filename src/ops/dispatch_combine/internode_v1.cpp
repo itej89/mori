@@ -1289,8 +1289,9 @@ __forceinline__ __device__ void EpCombineAllInternalFp8(EpDispatchCombineArgs<T>
   Fp8T** srcPtrs = reinterpret_cast<Fp8T**>(sharedMem) + warpId * config.numExpertPerToken;
   float** srcWeightsPtrs = reinterpret_cast<float**>(sharedMem) +
                            warpNum * config.numExpertPerToken + warpId * config.numExpertPerToken;
+  // v2: staging offset uses npes instead of nNodes
   uint8_t* stagingPtr = args.interNodeV1TokBufs.staging->template GetAs<uint8_t*>() +
-                        SendBufSlotOffset(config, nNodes, 0) * fp8CombXferBytes;
+                        SendBufSlotOffset(config, npes, 0) * fp8CombXferBytes;
 
   MultiWarpIter mwIter(globalWarpNum, args.curRankNumToken, hiddenDim);
 
@@ -1308,24 +1309,35 @@ __forceinline__ __device__ void EpCombineAllInternalFp8(EpDispatchCombineArgs<T>
       }
     }
 
-    if (laneId < nNodes) {
+    // v2: per-PE accumulation
+    if (laneId < config.numExpertPerToken) {
       srcPtrs[laneId] = nullptr;
       srcWeightsPtrs[laneId] = nullptr;
     }
 
-    for (int n = 0; n < nNodes; n++) {
-      if (__any(laneNode == n) && (laneId == 0)) {
-        int mappedId = (n == myNode) ? tokenId : args.interNodeDispSendMap[nNodes * tokenId + n];
-        uint8_t* base = stagingPtr + SendBufSlotOffset(config, n, mappedId) * fp8CombXferBytes;
-        srcPtrs[n] = reinterpret_cast<Fp8T*>(base) + hiddenDimOffset;
-        srcWeightsPtrs[n] = reinterpret_cast<float*>(base + fp8HiddenBytes);
+    int numContribs = 0;
+    for (int e = 0; e < config.numExpertPerToken && e < warpSize; e++) {
+      int pe = __shfl(lanePe, e);
+      if (pe < 0) continue;
+      bool dup = false;
+      for (int prev = 0; prev < e; prev++) {
+        if (__shfl(lanePe, prev) == pe) { dup = true; break; }
       }
+      if (dup) continue;
+      if (laneId == 0) {
+        int peNode = pe / config.gpuPerNode;
+        int mappedId = (peNode == myNode) ? tokenId : args.interNodeDispSendMap[npes * tokenId + pe];
+        uint8_t* base = stagingPtr + SendBufSlotOffset(config, pe, mappedId) * fp8CombXferBytes;
+        srcPtrs[numContribs] = reinterpret_cast<Fp8T*>(base) + hiddenDimOffset;
+        srcWeightsPtrs[numContribs] = reinterpret_cast<float*>(base + fp8HiddenBytes);
+      }
+      numContribs++;
     }
 
     T* out = args.interNodeV1TokBufs.combineOut->template GetAs<T*>() + tokenId * hiddenDim +
              hiddenDimOffset;
     core::WarpAccumCombineInternalFp8ToBf16(out, reinterpret_cast<const Fp8T* const*>(srcPtrs),
-                                            nNodes, laneId, hiddenDimSize);
+                                            numContribs, laneId, hiddenDimSize);
 
     if (args.weightsBuf && (inTokenPartId == mwIter.warpsPerItem - 1)) {
       core::WarpAccum<float, 4>(args.shmemCombineOutWeightsMemObj->template GetAs<float*>() +
