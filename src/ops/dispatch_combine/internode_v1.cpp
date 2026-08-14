@@ -639,9 +639,10 @@ inline __device__ void DispatchSync(EpDispatchCombineArgs<T>& args) {
     }
   }
 
-  for (int i = globalWarpId; i < nNodes; i += globalWarpNum) {
-    int proxyPe = i * config.gpuPerNode + (config.rank % config.gpuPerNode);
-    shmem::ShmemQuietThread(proxyPe);
+  // v2: quiet all remote PEs we may have sent to
+  for (int pe = globalWarpId; pe < npes; pe += globalWarpNum) {
+    if (pe / config.gpuPerNode == myNode) continue;
+    shmem::ShmemQuietThread(pe);
   }
 }
 
@@ -887,8 +888,10 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
                           warpNum * config.numExpertPerToken + warpId * config.numExpertPerToken;
   uint8_t* stagingPtr = args.interNodeV1TokBufs.staging->template GetAs<uint8_t*>();
 
+  // v2: iterate over remote PEs instead of nodes
+  int numRemotePes = npes - config.gpuPerNode;
   int totalBids = 0;
-  for (int bid = blockId; bid < numRecvBlock * maxChunkNum * (nNodes - 1);
+  for (int bid = blockId; bid < numRecvBlock * maxChunkNum * numRemotePes;
        bid += args.rdmaBlockNum) {
     totalBids++;
   }
@@ -902,7 +905,7 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
     while (processedMask !=
            ((currentBatchSize == 32) ? 0xFFFFFFFF : ((1u << currentBatchSize) - 1))) {
       int bidIdx = 0;
-      for (int bid = blockId; bid < numRecvBlock * maxChunkNum * (nNodes - 1);
+      for (int bid = blockId; bid < numRecvBlock * maxChunkNum * numRemotePes;
            bid += args.rdmaBlockNum) {
         if (bidIdx < batchStart) {
           bidIdx++;
@@ -912,17 +915,17 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
 
         int relativeIdx = bidIdx - batchStart;
         if (!((processedMask >> relativeIdx) & 1)) {
-          int k = bid / (numRecvBlock * (nNodes - 1));
-          int i = (bid / numRecvBlock) % (nNodes - 1);
-          int node = (myNode + 1 + i) % nNodes;
+          int k = bid / (numRecvBlock * numRemotePes);
+          int i = (bid / numRecvBlock) % numRemotePes;
+          int node = (myNode * config.gpuPerNode + config.gpuPerNode + i) % npes;  // v2: source PE
 
           uint64_t thisChunkTokenNum = 0;
           int startTokenIdx = k * warpSize;
 
           if (laneId == 0) {
-            thisChunkTokenNum = chunkFlag[node * maxChunkNum + k];
+            thisChunkTokenNum = chunkFlag[node * maxChunkNum + k];  // node = source PE in v2
             if (thisChunkTokenNum == 0) {
-              index_t nodeFlag = core::AtomicLoadRelaxedSystem(&nodeRecvTokenNum[node]);
+              index_t nodeFlag = core::AtomicLoadRelaxedSystem(&nodeRecvTokenNum[node]);  // source PE
               if ((nodeFlag > 0) && (startTokenIdx >= (nodeFlag - 1))) {
                 thisChunkTokenNum = 1;
               }
@@ -944,8 +947,8 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
                 index_t destTokId =
                     args.interNodeDispDestTokIdMap[tokIdx * config.numExpertPerToken + laneId];
                 index_t destPe = PeFromFlatTokenIndex(config, destTokId);
-                index_t destNode = destPe / config.gpuPerNode;
-                if (destNode == myNode) {
+                // v2: expert result is on this PE (direct routing)
+                if (destPe == myPe) {
                   index_t destLocalTokId = LocalTokIdFromFlatTokenIndex(config, destTokId);
                   srcPtrs[laneId] =
                       args.interNodeV1TokBufs.combineInp->template GetAs<TokT*>(destPe) +
@@ -985,14 +988,14 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
                 core::AtomicStoreRelaxedSystem(
                     args.interNodeChunkFlagCombine + node * maxChunkNum + k, index_t{0});
               }
-              int proxyPe = node * config.gpuPerNode + (config.rank % config.gpuPerNode);
+              // v2: send combine result directly to source PE
               int qpId = k % config.numQpPerPe;
               shmem::ShmemPutTypeNbiWarp<uint8_t>(
                   args.interNodeV1TokBufs.staging,
-                  SendBufSlotOffset(config, myNode + nNodes, startTokenIdx) * tokCombXferBytes,
+                  SendBufSlotOffset(config, myPe + npes, startTokenIdx) * tokCombXferBytes,
                   args.interNodeV1TokBufs.staging,
                   SendBufSlotOffset(config, node, startTokenIdx) * tokCombXferBytes,
-                  thisChunkTokenNum * tokCombXferBytes, proxyPe, qpId);
+                  thisChunkTokenNum * tokCombXferBytes, node, qpId);  // node = source PE
             }
           }
           processedMask |= (1u << relativeIdx);
@@ -1019,26 +1022,27 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
   barrierFlag = __shfl(barrierFlag, 0);
 
   if ((finishedWarp + 1) == (args.rdmaBlockNum * warpNum)) {
-    if (laneId < nNodes) {
-      core::AtomicStoreSeqCstSystem(
-          args.nodeRecvTokenNumMemObj->template GetAs<uint64_t*>() + laneId, uint64_t{0});
-    }
-    if ((laneId < nNodes) &&
-        (laneId != myNode)) {  // avoid setting myNode, it will be set in intra node branch
-      int proxyPe = laneId * config.gpuPerNode + (config.rank % config.gpuPerNode);
-      for (int i = 0; i < config.numQpPerPe; i++) {
-        shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.crossDeviceBarrierMemObj,
-                                                       args.config.rank * sizeof(uint64_t), 1,
-                                                       core::AMO_ADD, proxyPe, i);
+    // v2: reset per-PE recv token counters and signal per remote PE
+    for (int pe = laneId; pe < npes; pe += warpSize) {
+      if (pe / config.gpuPerNode != myNode) {
+        core::AtomicStoreSeqCstSystem(
+            args.nodeRecvTokenNumMemObj->template GetAs<uint64_t*>() + pe, uint64_t{0});
+        for (int qi = 0; qi < config.numQpPerPe; qi++) {
+          shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.crossDeviceBarrierMemObj,
+                                                         args.config.rank * sizeof(uint64_t), 1,
+                                                         core::AMO_ADD, pe, qi);
+        }
       }
     }
     if (laneId == 0) args.interNodeBlocksBarrier[0] = 0;
 
+    // v2: wait for all remote PEs
     uint64_t* localBarrierPtr = args.crossDeviceBarrierMemObj->template GetAs<uint64_t*>();
-    if ((laneId < nNodes) && (laneId != myNode)) {
-      int proxyPe = laneId * config.gpuPerNode + (config.rank % config.gpuPerNode);
-      while (core::AtomicLoadRelaxedSystem(localBarrierPtr + proxyPe) !=
-             (barrierFlag * config.numQpPerPe)) {
+    for (int pe = laneId; pe < npes; pe += warpSize) {
+      if (pe / config.gpuPerNode != myNode) {
+        while (core::AtomicLoadRelaxedSystem(localBarrierPtr + pe) !=
+               (barrierFlag * config.numQpPerPe)) {
+        }
       }
     }
   }
@@ -1326,7 +1330,7 @@ __forceinline__ __device__ void EpCombineAllInternalFp8(EpDispatchCombineArgs<T>
     if (args.weightsBuf && (inTokenPartId == mwIter.warpsPerItem - 1)) {
       core::WarpAccum<float, 4>(args.shmemCombineOutWeightsMemObj->template GetAs<float*>() +
                                     tokenId * config.numExpertPerToken,
-                                srcWeightsPtrs, nullptr, nNodes, config.numExpertPerToken);
+                                srcWeightsPtrs, nullptr, numContribs, config.numExpertPerToken);
     }
   }
 }
@@ -1339,8 +1343,9 @@ __forceinline__ __device__ void EpCombineAllGeneric(EpDispatchCombineArgs<T>& ar
   T** srcPtrs = reinterpret_cast<T**>(sharedMem) + warpId * config.numExpertPerToken;
   float** srcWeightsPtrs = reinterpret_cast<float**>(sharedMem) +
                            warpNum * config.numExpertPerToken + warpId * config.numExpertPerToken;
+  // v2: staging offset uses npes instead of nNodes for return slab
   uint8_t* stagingPtr = args.interNodeV1TokBufs.staging->template GetAs<uint8_t*>() +
-                        SendBufSlotOffset(config, nNodes, 0) * combXferBytes;
+                        SendBufSlotOffset(config, npes, 0) * combXferBytes;
 
   MultiWarpIter mwIter(globalWarpNum, args.curRankNumToken, hiddenDim);
 
@@ -1358,26 +1363,39 @@ __forceinline__ __device__ void EpCombineAllGeneric(EpDispatchCombineArgs<T>& ar
       }
     }
 
-    if (laneId < nNodes) {
+    // v2: accumulate per-PE contributions (at most numExpertPerToken distinct PEs)
+    if (laneId < config.numExpertPerToken) {
       srcPtrs[laneId] = nullptr;
       srcWeightsPtrs[laneId] = nullptr;
     }
 
-    for (int n = 0; n < nNodes; n++) {
-      if (__any(laneNode == n) && (laneId == 0)) {
-        int mappedId = (n == myNode) ? tokenId : args.interNodeDispSendMap[nNodes * tokenId + n];
-        uint8_t* base = stagingPtr + SendBufSlotOffset(config, n, mappedId) * combXferBytes;
-        srcPtrs[n] = reinterpret_cast<T*>(base) + hiddenDimOffset;
-        srcWeightsPtrs[n] = reinterpret_cast<float*>(base + hiddenBytes);
+    // Each expert lane contributes its PE's staging result
+    int numContribs = 0;
+    for (int e = 0; e < config.numExpertPerToken && e < warpSize; e++) {
+      int pe = __shfl(lanePe, e);
+      if (pe < 0) continue;
+      // Dedup: skip if an earlier expert already contributed from this PE
+      bool dup = false;
+      for (int prev = 0; prev < e; prev++) {
+        if (__shfl(lanePe, prev) == pe) { dup = true; break; }
       }
+      if (dup) continue;
+      if (laneId == 0) {
+        int peNode = pe / config.gpuPerNode;
+        int mappedId = (peNode == myNode) ? tokenId : args.interNodeDispSendMap[npes * tokenId + pe];
+        uint8_t* base = stagingPtr + SendBufSlotOffset(config, pe, mappedId) * combXferBytes;
+        srcPtrs[numContribs] = reinterpret_cast<T*>(base) + hiddenDimOffset;
+        srcWeightsPtrs[numContribs] = reinterpret_cast<float*>(base + hiddenBytes);
+      }
+      numContribs++;
     }
     core::WarpAccum<T, 4>(args.interNodeV1TokBufs.combineOut->template GetAs<T*>() +
                               tokenId * hiddenDim + hiddenDimOffset,
-                          srcPtrs, nullptr, nNodes, hiddenDimSize);
+                          srcPtrs, nullptr, numContribs, hiddenDimSize);
     if (args.weightsBuf && (inTokenPartId == mwIter.warpsPerItem - 1)) {
       core::WarpAccum<float, 4>(args.shmemCombineOutWeightsMemObj->template GetAs<float*>() +
                                     tokenId * config.numExpertPerToken,
-                                srcWeightsPtrs, nullptr, nNodes, config.numExpertPerToken);
+                                srcWeightsPtrs, nullptr, numContribs, config.numExpertPerToken);
     }
   }
 }
