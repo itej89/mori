@@ -62,6 +62,7 @@ class ProxyThread {
   uint64_t pcie_hops_{0};
   uint64_t xgmi_send_{0};
   uint64_t xgmi_recv_{0};
+  uint64_t per_peer_count_[16]{};
 };
 
 }  // namespace core

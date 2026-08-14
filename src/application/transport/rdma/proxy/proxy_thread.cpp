@@ -41,8 +41,14 @@ void ProxyThread::Shutdown() {
   if (ring_) ring_->shutdown = 1;
   running_.store(false);
   pthread_join(thread_, nullptr);
-  fprintf(stderr, "[HOP-STATS] gpu=%d nic=%d pcie=%lu xgmi_send=%lu xgmi_recv=%lu posted=%lu completed=%lu\n",
-          gpu_id_, nic_id_, pcie_hops_, xgmi_send_, xgmi_recv_, ops_posted_, ops_completed_);
+  if (ops_posted_ > 0) {
+    fprintf(stderr, "[HOP-STATS] gpu=%d nic=%d pcie=%lu xgmi_send=%lu xgmi_recv=%lu posted=%lu completed=%lu peers=[",
+            gpu_id_, nic_id_, pcie_hops_, xgmi_send_, xgmi_recv_, ops_posted_, ops_completed_);
+    for (int p = 0; p < 16; p++) {
+      if (per_peer_count_[p] > 0) fprintf(stderr, "g%d:%lu ", p, per_peer_count_[p]);
+    }
+    fprintf(stderr, "]\n");
+  }
 }
 
 void* ProxyThread::ThreadFunc(void* arg) {
@@ -245,10 +251,7 @@ void ProxyThread::MainLoop() {
             int peerLocalGpu = peer % num_nics_;
             int recvNic = (gpu_id_ > peerLocalGpu ? gpu_id_ : peerLocalGpu) % num_nics_;
             if (recvNic != peerLocalGpu) xgmi_recv_++;
-            if (ops_posted_ <= 3)
-              fprintf(stderr, "[HOP-DEBUG] gpu=%d nic=%d qi=%u peer=%d peerLocal=%d recvNic=%d xgmi_recv=%s nqp=%d nnics=%d\n",
-                      gpu_id_, nic_id_, qi, peer, peerLocalGpu, recvNic,
-                      (recvNic != peerLocalGpu) ? "YES" : "no", num_qp_per_pe_, num_nics_);
+            per_peer_count_[peerLocalGpu]++;
             break;
           }
 
