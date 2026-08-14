@@ -14,13 +14,16 @@ namespace core {
 
 ProxyThread::~ProxyThread() { Shutdown(); }
 
-void ProxyThread::Init(ProxyRing* ring, std::vector<ProxyQpHandle> qps, int gpuId) {
+void ProxyThread::Init(ProxyRing* ring, std::vector<ProxyQpHandle> qps, int gpuId, int nicId) {
   ring_ = ring;
   qps_ = std::move(qps);
   next_slot_ = 0;
   ops_posted_ = 0;
   ops_completed_ = 0;
   gpu_id_ = gpuId;
+  nic_id_ = nicId;
+  pcie_hops_ = 0;
+  xgmi_hops_ = 0;
 }
 
 void ProxyThread::Start() {
@@ -34,6 +37,8 @@ void ProxyThread::Shutdown() {
   if (ring_) ring_->shutdown = 1;
   running_.store(false);
   pthread_join(thread_, nullptr);
+  fprintf(stderr, "[HOP-STATS] gpu=%d nic=%d pcie=%lu xgmi=%lu total_posted=%lu completed=%lu\n",
+          gpu_id_, nic_id_, pcie_hops_, xgmi_hops_, ops_posted_, ops_completed_);
 }
 
 void* ProxyThread::ThreadFunc(void* arg) {
@@ -230,6 +235,8 @@ void ProxyThread::MainLoop() {
 
           if (ret == 0) {
             ops_posted_++;
+            pcie_hops_++;
+            if (nic_id_ != gpu_id_) xgmi_hops_++;
             break;
           }
 
