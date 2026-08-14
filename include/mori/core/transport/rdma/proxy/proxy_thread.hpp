@@ -35,7 +35,8 @@ class ProxyThread {
   ProxyThread() = default;
   ~ProxyThread();
 
-  void Init(ProxyRing* ring, std::vector<ProxyQpHandle> qps, int gpuId = 0, int nicId = 0);
+  void Init(ProxyRing* ring, std::vector<ProxyQpHandle> qps, int gpuId = 0, int nicId = 0,
+            int numNics = 1, int numQpPerPe = 4);
   void Start();
   void Shutdown();
 
@@ -56,8 +57,11 @@ class ProxyThread {
   uint64_t ops_completed_{0};
   int gpu_id_{0};
   int nic_id_{0};
+  int num_nics_{1};
+  int num_qp_per_pe_{4};
   uint64_t pcie_hops_{0};
-  uint64_t xgmi_hops_{0};
+  uint64_t xgmi_send_{0};
+  uint64_t xgmi_recv_{0};
 };
 
 }  // namespace core
