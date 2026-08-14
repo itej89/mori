@@ -50,6 +50,11 @@ template <typename T>
 __device__ void EpDispatchInterNodeKernel_body(EpDispatchCombineArgs<T> args) {
   const EpDispatchCombineConfig& config = args.config;
 
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    printf("[V0-TRACE] rank=%d ENTER dispatch gridDim=%d blockDim=%d\n",
+           config.rank, gridDim.x, blockDim.x);
+  }
+
   int thdId = threadIdx.x;
   int thdNum = blockDim.x;
 
@@ -132,6 +137,10 @@ __device__ void EpDispatchInterNodeKernel_body(EpDispatchCombineArgs<T> args) {
 
   if (laneId == 0) {
     shmem::ShmemUint32WaitUntilEquals(args.dispatchGridBarrier, 0);
+  }
+
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    printf("[V0-TRACE] rank=%d PAST barrier, starting RDMA dispatch\n", myPe);
   }
 
   // TODO: block num should be multiple of npes
@@ -384,6 +393,11 @@ __global__ void EpDispatchInterNodeKernel(EpDispatchCombineArgs<T> args) {
 template <typename T>
 __device__ void EpCombineInterNodeKernel_body(EpDispatchCombineArgs<T> args) {
   const EpDispatchCombineConfig& config = args.config;
+
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    printf("[V0-TRACE] rank=%d ENTER combine\n", config.rank);
+  }
+
   int thdId = threadIdx.x;
   int thdNum = blockDim.x;
 
