@@ -130,7 +130,7 @@ bool ProxyThread::BuildWr(volatile ProxyCmd* cmd, ProxyQpHandle& qph,
       wr.opcode = IBV_WR_RDMA_WRITE;
       wr.send_flags |= IBV_SEND_INLINE;
       wr.wr.rdma.remote_addr = cmd->dst_addr;
-      wr.wr.rdma.rkey = (qph.rkey_override != 0) ? qph.rkey_override : cmd->rkey;
+      wr.wr.rdma.rkey = cmd->rkey;  // signals target non-heap MRs, don't override
       break;
     }
     case PROXY_ATOMIC_FETCH_ADD:
@@ -138,7 +138,7 @@ bool ProxyThread::BuildWr(volatile ProxyCmd* cmd, ProxyQpHandle& qph,
       if (qph.use_native_atomics) {
         wr.opcode = IBV_WR_ATOMIC_FETCH_AND_ADD;
         wr.wr.atomic.remote_addr = cmd->dst_addr;
-        wr.wr.atomic.rkey = (qph.rkey_override != 0) ? qph.rkey_override : cmd->rkey;
+        wr.wr.atomic.rkey = cmd->rkey;  // atomics target non-heap MRs, don't override
         wr.wr.atomic.compare_add = cmd->atomic_arg;
         sge.addr = cmd->src_addr;
         sge.length = 8;
