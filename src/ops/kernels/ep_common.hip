@@ -3,7 +3,7 @@
 //
 // Common includes, shims, and wrapper macros shared by dispatch/combine kernel files.
 // Not compiled directly — included by ep_*.hip kernel files.
-// investigation: force JIT recompile v7 — cross-NIC test
+// investigation: force JIT recompile v8 — symmetric cross-NIC XOR swap
 
 #pragma once
 

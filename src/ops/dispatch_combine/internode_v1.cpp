@@ -164,7 +164,7 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
   // Then send to other nodes
   for (int i = warpId; i < nNodes; i += warpNum) {
     if (i == myNode) continue;
-    int proxyPe = i * config.gpuPerNode + (config.rank % config.gpuPerNode);
+    int proxyPe = i * config.gpuPerNode + ((config.rank ^ 1) % config.gpuPerNode);
     if (DEDUP) {
       for (int tokenId = startTokenIdx + laneId; tokenId < endTokenIdx; tokenId += warpSize) {
         bool shouldSend = false;
@@ -276,7 +276,7 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
   finishedWarp = __shfl(finishedWarp, 0);
   if ((finishedWarp + 1) == (args.rdmaBlockNum * warpNum)) {
     if (laneId < nNodes) {
-      int proxyPe = laneId * config.gpuPerNode + (config.rank % config.gpuPerNode);
+      int proxyPe = laneId * config.gpuPerNode + ((config.rank ^ 1) % config.gpuPerNode);
       index_t numTokenSignal =
           core::AtomicLoadRelaxed(args.blockFlagCounter + laneId) * warpSize + 1;
       shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.nodeRecvTokenNumMemObj,
@@ -303,7 +303,7 @@ inline __device__ void DispatchInterNodeLLSend(EpDispatchCombineArgs<T>& args) {
       std::min(chunkStartTokenIdx + blockChunkNum * warpSize, args.curRankNumToken);
   for (int i = warpId; i < nNodes; i += warpNum) {
     if (i == myNode) continue;
-    int proxyPe = i * config.gpuPerNode + (config.rank % config.gpuPerNode);
+    int proxyPe = i * config.gpuPerNode + ((config.rank ^ 1) % config.gpuPerNode);
 
     for (int tokenId = chunkStartTokenIdx + laneId; tokenId < chunkEndTokenIdx;
          tokenId += warpSize) {
@@ -347,7 +347,7 @@ inline __device__ void DispatchInterNodeLLSend(EpDispatchCombineArgs<T>& args) {
   finishedWarp = __shfl(finishedWarp, 0);
   if ((finishedWarp + 1) == (args.rdmaBlockNum * warpNum)) {
     if (laneId < nNodes) {
-      int proxyPe = laneId * config.gpuPerNode + (config.rank % config.gpuPerNode);
+      int proxyPe = laneId * config.gpuPerNode + ((config.rank ^ 1) % config.gpuPerNode);
       index_t numTokenSignal =
           core::AtomicLoadRelaxed(args.blockFlagCounter + laneId) * warpSize + 1;
       shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.nodeRecvTokenNumMemObj,
@@ -631,7 +631,7 @@ inline __device__ void DispatchSync(EpDispatchCombineArgs<T>& args) {
   }
 
   for (int i = globalWarpId; i < nNodes; i += globalWarpNum) {
-    int proxyPe = i * config.gpuPerNode + (config.rank % config.gpuPerNode);
+    int proxyPe = i * config.gpuPerNode + ((config.rank ^ 1) % config.gpuPerNode);
     shmem::ShmemQuietThread(proxyPe);
   }
 }
@@ -976,7 +976,7 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
                 core::AtomicStoreRelaxedSystem(
                     args.interNodeChunkFlagCombine + node * maxChunkNum + k, index_t{0});
               }
-              int proxyPe = node * config.gpuPerNode + (config.rank % config.gpuPerNode);
+              int proxyPe = node * config.gpuPerNode + ((config.rank ^ 1) % config.gpuPerNode);
               int qpId = k % config.numQpPerPe;
               shmem::ShmemPutTypeNbiWarp<uint8_t>(
                   args.interNodeV1TokBufs.staging,
@@ -1016,7 +1016,7 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
     }
     if ((laneId < nNodes) &&
         (laneId != myNode)) {  // avoid setting myNode, it will be set in intra node branch
-      int proxyPe = laneId * config.gpuPerNode + (config.rank % config.gpuPerNode);
+      int proxyPe = laneId * config.gpuPerNode + ((config.rank ^ 1) % config.gpuPerNode);
       for (int i = 0; i < config.numQpPerPe; i++) {
         shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.crossDeviceBarrierMemObj,
                                                        args.config.rank * sizeof(uint64_t), 1,
@@ -1027,7 +1027,7 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
 
     uint64_t* localBarrierPtr = args.crossDeviceBarrierMemObj->template GetAs<uint64_t*>();
     if ((laneId < nNodes) && (laneId != myNode)) {
-      int proxyPe = laneId * config.gpuPerNode + (config.rank % config.gpuPerNode);
+      int proxyPe = laneId * config.gpuPerNode + ((config.rank ^ 1) % config.gpuPerNode);
       while (core::AtomicLoadRelaxedSystem(localBarrierPtr + proxyPe) !=
              (barrierFlag * config.numQpPerPe)) {
       }
@@ -1119,7 +1119,7 @@ __forceinline__ __device__ void CombineInterNodeLLTyped(EpDispatchCombineArgs<T>
           core::AtomicStoreRelaxedSystem(args.interNodeChunkFlagCombine + node * maxChunkNum + k,
                                          index_t{0});
         }
-        int proxyPe = node * config.gpuPerNode + (config.rank % config.gpuPerNode);
+        int proxyPe = node * config.gpuPerNode + ((config.rank ^ 1) % config.gpuPerNode);
         int qpId = k % config.numQpPerPe;
         shmem::ShmemPutTypeNbiWarp<uint8_t>(
             args.interNodeV1TokBufs.staging,
@@ -1151,7 +1151,7 @@ __forceinline__ __device__ void CombineInterNodeLLTyped(EpDispatchCombineArgs<T>
     }
     if ((laneId < nNodes) &&
         (laneId != myNode)) {  // avoid setting myNode, it will be set in intra node branch
-      int proxyPe = laneId * config.gpuPerNode + (config.rank % config.gpuPerNode);
+      int proxyPe = laneId * config.gpuPerNode + ((config.rank ^ 1) % config.gpuPerNode);
       for (int i = 0; i < config.numQpPerPe; i++) {
         shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.crossDeviceBarrierMemObj,
                                                        args.config.rank * sizeof(uint64_t), 1,
@@ -1164,7 +1164,7 @@ __forceinline__ __device__ void CombineInterNodeLLTyped(EpDispatchCombineArgs<T>
     // Wait other nodes
     uint64_t* localBarrierPtr = args.crossDeviceBarrierMemObj->template GetAs<uint64_t*>();
     if ((laneId < nNodes) && (laneId != myNode)) {
-      int proxyPe = laneId * config.gpuPerNode + (config.rank % config.gpuPerNode);
+      int proxyPe = laneId * config.gpuPerNode + ((config.rank ^ 1) % config.gpuPerNode);
       while (core::AtomicLoadRelaxedSystem(localBarrierPtr + proxyPe) !=
              (barrierFlag * config.numQpPerPe)) {
       }
