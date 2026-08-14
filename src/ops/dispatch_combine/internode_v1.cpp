@@ -161,18 +161,20 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
   int startTokenIdx = blockChunkNum * blockId * warpSize;
   int endTokenIdx = std::min(startTokenIdx + blockChunkNum * warpSize, args.curRankNumToken);
 
-  // Then send to other nodes
-  for (int i = warpId; i < nNodes; i += warpNum) {
-    if (i == myNode) continue;
-    int proxyPe = i * config.gpuPerNode + (config.rank % config.gpuPerNode);
+  // Send to remote PEs directly (v2 direct-to-expert routing)
+  // Outer loop iterates over remote PEs, not nodes.
+  // Each token is sent directly to the PE that owns its expert.
+  for (int remotePe = warpId; remotePe < npes; remotePe += warpNum) {
+    int remoteNode = remotePe / config.gpuPerNode;
+    if (remoteNode == myNode) continue;
     if (DEDUP) {
       for (int tokenId = startTokenIdx + laneId; tokenId < endTokenIdx; tokenId += warpSize) {
         bool shouldSend = false;
         for (int e = 0; e < config.numExpertPerToken; e++) {
           index_t laneExpert = args.tokenIndices[tokenId * numExpertPerToken + e];
           if (laneExpert < 0) continue;
-          int destNode = laneExpert / config.numExpertPerRank / config.gpuPerNode;
-          if (destNode == i) {
+          int destPe = laneExpert / config.numExpertPerRank;
+          if (destPe == remotePe) {
             shouldSend |= true;
             if (!args.replayMode)
               args.dispDestTokIdMap[tokenId * numExpertPerToken + e] = NullFlatTokenIndex(config);
@@ -183,20 +185,18 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
 
         if (num == 0) continue;
 
-        // atomicAdd runs in both paths so blockFlagCounter stays in sync with cache routing.
         index_t flag = 0;
         index_t flagSlotId = 0;
         if (laneId == 0) {
-          flagSlotId = atomicAdd(args.blockFlagCounter + i, 1);
+          flagSlotId = atomicAdd(args.blockFlagCounter + remotePe, 1);
           flag = num + 1;
         }
         flag = __shfl(flag, 0);
         flagSlotId = __shfl(flagSlotId, 0);
 
         if (args.replayMode) {
-          // Recover the deterministic flag slot from the cached send map.
           int firstSender = __ffsll(static_cast<unsigned long long>(mask)) - 1;
-          index_t myCached = shouldSend ? args.interNodeDispSendMap[nNodes * tokenId + i] : 0;
+          index_t myCached = shouldSend ? args.interNodeDispSendMap[npes * tokenId + remotePe] : 0;
           flagSlotId = __shfl(myCached, firstSender) / warpSize;
         }
 
@@ -211,15 +211,15 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
           int count = 0;
           if (!prev) {
             count = 1;
-            for (int i = laneId + 1; i < warpSize; i++) {
-              if ((mask >> i) & 1ULL) {
+            for (int ii = laneId + 1; ii < warpSize; ii++) {
+              if ((mask >> ii) & 1ULL) {
                 count++;
               } else {
                 break;
               }
             }
           }
-          size_t remoteIdx = SendBufSlotOffset(config, myNode, destTokId);
+          size_t remoteIdx = SendBufSlotOffset(config, myPe, destTokId);
           if (count > 0) {
             size_t stagingTokOffset = tokenId * xferBytes;
             int qpId = (tokenId / warpSize) % config.numQpPerPe;
@@ -227,10 +227,10 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
                 args.interNodeV1TokBufs.dispatchInp, remoteIdx * xferBytes,
                 args.interNodeV1TokBufs.dispatchStaging, stagingTokOffset, count * xferBytes,
                 args.interNodeChunkFlagMemObj,
-                (myNode * maxChunkNum + flagSlotId) * sizeof(uint64_t), flag,
-                core::atomicType::AMO_ADD, proxyPe, qpId);
+                (myPe * maxChunkNum + flagSlotId) * sizeof(uint64_t), flag,
+                core::atomicType::AMO_ADD, remotePe, qpId);
           }
-          if (!args.replayMode) args.interNodeDispSendMap[nNodes * tokenId + i] = destTokId;
+          if (!args.replayMode) args.interNodeDispSendMap[npes * tokenId + remotePe] = destTokId;
         }
       }
     } else {
@@ -239,8 +239,8 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
         for (int e = 0; e < config.numExpertPerToken; e++) {
           index_t laneExpert = args.tokenIndices[tokenId * numExpertPerToken + e];
           if (laneExpert < 0) continue;
-          int destNode = laneExpert / config.numExpertPerRank / config.gpuPerNode;
-          if (destNode == i) {
+          int destPe = laneExpert / config.numExpertPerRank;
+          if (destPe == remotePe) {
             shouldSend |= true;
             args.dispDestTokIdMap[tokenId * numExpertPerToken + e] = NullFlatTokenIndex(config);
           }
@@ -248,14 +248,14 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
 
         index_t flagSlotId = 0;
         if (laneId == 0) {
-          flagSlotId = atomicAdd(args.blockFlagCounter + i, 1);
+          flagSlotId = atomicAdd(args.blockFlagCounter + remotePe, 1);
         }
         flagSlotId = __shfl(flagSlotId, 0);
 
         index_t destTokIdOffset = flagSlotId * warpSize;
         index_t destTokId = destTokIdOffset + laneId;
 
-        size_t remoteIdx = SendBufSlotOffset(config, myNode, destTokId);
+        size_t remoteIdx = SendBufSlotOffset(config, myPe, destTokId);
         if (laneId == 0) {
           index_t tokenNum = std::min(tokenId + warpSize, endTokenIdx) - tokenId;
           size_t stagingTokOffset = tokenId * xferBytes;
@@ -263,10 +263,10 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
           shmem::ShmemPutMemNbiSignalThread(
               args.interNodeV1TokBufs.dispatchInp, remoteIdx * xferBytes,
               args.interNodeV1TokBufs.dispatchStaging, stagingTokOffset, tokenNum * xferBytes,
-              args.interNodeChunkFlagMemObj, (myNode * maxChunkNum + flagSlotId) * sizeof(uint64_t),
-              tokenNum + 1, core::atomicType::AMO_ADD, proxyPe, qpId);
+              args.interNodeChunkFlagMemObj, (myPe * maxChunkNum + flagSlotId) * sizeof(uint64_t),
+              tokenNum + 1, core::atomicType::AMO_ADD, remotePe, qpId);
         }
-        if (shouldSend) args.interNodeDispSendMap[nNodes * tokenId + i] = destTokId;
+        if (shouldSend) args.interNodeDispSendMap[npes * tokenId + remotePe] = destTokId;
       }
     }
   }
@@ -275,13 +275,17 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
   if (laneId == 0) finishedWarp = atomicAdd(args.interNodeBlocksBarrier, 1);
   finishedWarp = __shfl(finishedWarp, 0);
   if ((finishedWarp + 1) == (args.rdmaBlockNum * warpNum)) {
-    if (laneId < nNodes) {
-      int proxyPe = laneId * config.gpuPerNode + (config.rank % config.gpuPerNode);
+    // Signal each remote PE with total token count
+    for (int lane = laneId; lane < npes; lane += warpSize) {
+      int remoteNode = lane / config.gpuPerNode;
+      if (remoteNode == myNode) continue;
       index_t numTokenSignal =
-          core::AtomicLoadRelaxed(args.blockFlagCounter + laneId) * warpSize + 1;
-      shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.nodeRecvTokenNumMemObj,
-                                                     myNode * sizeof(uint64_t), numTokenSignal,
-                                                     core::AMO_ADD, proxyPe);
+          core::AtomicLoadRelaxed(args.blockFlagCounter + lane) * warpSize + 1;
+      if (numTokenSignal > 1) {
+        shmem::ShmemAtomicTypeNonFetchThread<uint64_t>(args.nodeRecvTokenNumMemObj,
+                                                       myPe * sizeof(uint64_t), numTokenSignal,
+                                                       core::AMO_ADD, lane);
+      }
     }
     if (laneId == 0) args.interNodeBlocksBarrier[0] = 0;
   }
@@ -375,22 +379,26 @@ inline __device__ void DispatchInterNodeRecv(EpDispatchCombineArgs<T>& args) {
   int localPeTokenCounter = 0;
   int totalChunkNum = 0;
 
-  for (int bid = blockId; bid < numRecvBlock * maxChunkNum * (nNodes - 1);
+  // v2: iterate over remote PEs that sent directly to us
+  int numRemotePes = npes - config.gpuPerNode;
+  for (int bid = blockId; bid < numRecvBlock * maxChunkNum * numRemotePes;
        bid += args.rdmaBlockNum) {
-    int k = bid / (numRecvBlock * (nNodes - 1));
-    int i = (bid / numRecvBlock) % (nNodes - 1);
+    int k = bid / (numRecvBlock * numRemotePes);
+    int i = (bid / numRecvBlock) % numRemotePes;
 
-    int node = (myNode + 1 + i) % nNodes;
+    // Map i to an actual remote PE, skipping same-node PEs
+    int remotePe = (myNode * config.gpuPerNode + config.gpuPerNode + i) % npes;
+    int node = remotePe;  // v2: "node" is actually source PE
     int startTokenIdx = k * warpSize;
 
     uint64_t thisChunkTokenNum = 0;
     index_t nodeFlag = 0;
     if (laneId == 0) {
       while (1) {
-        thisChunkTokenNum = core::AtomicLoadRelaxedSystem(&chunkFlag[node * maxChunkNum + k]);
+        thisChunkTokenNum = core::AtomicLoadRelaxedSystem(&chunkFlag[remotePe * maxChunkNum + k]);
         if (thisChunkTokenNum > 0) break;
 
-        nodeFlag = core::AtomicLoadRelaxedSystem(&nodeRecvTokenNum[node]);
+        nodeFlag = core::AtomicLoadRelaxedSystem(&nodeRecvTokenNum[remotePe]);
         if ((nodeFlag > 0) && (startTokenIdx >= (nodeFlag - 1))) {
           thisChunkTokenNum = 1;
           break;
@@ -429,7 +437,8 @@ inline __device__ void DispatchInterNodeRecv(EpDispatchCombineArgs<T>& args) {
         // and an OOB GetAs/WarpCopy/atomicAdd -> HSA page fault. Treat any
         // out-of-range destPe as a dropped token via the existing skip path.
         bool peOutOfRange = (destPe < 0) || (destPe >= config.worldSize);
-        bool shouldSkip = peOutOfRange || isSentinelSlot || (destNode != myNode) ||
+        // v2: only process experts that belong to THIS PE (direct routing)
+        bool shouldSkip = peOutOfRange || isSentinelSlot || (destPe != myPe) ||
                           __any((laneId < e) && (destPe == lanePe));
         if (shouldSkip) {
           if (!args.replayMode && laneId == 0)
