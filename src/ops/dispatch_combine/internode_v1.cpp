@@ -162,10 +162,6 @@ inline __device__ void DispatchInterNodeSend(EpDispatchCombineArgs<T>& args) {
   int endTokenIdx = std::min(startTokenIdx + blockChunkNum * warpSize, args.curRankNumToken);
 
   // Send to remote PEs directly (v2 direct-to-expert routing)
-  if (threadIdx.x == 0 && blockIdx.x == 0) {
-    printf("[V2-SEND] rank=%d startTok=%d endTok=%d npes=%d warpNum=%d\n",
-           myPe, startTokenIdx, endTokenIdx, npes, warpNum);
-  }
   for (int remotePe = warpId; remotePe < npes; remotePe += warpNum) {
     int remoteNode = remotePe / config.gpuPerNode;
     if (remoteNode == myNode) continue;
@@ -891,7 +887,6 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
   // v2: iterate over remote PEs instead of nodes
   int numRemotePes = npes - config.gpuPerNode;
   if (threadIdx.x == 0 && blockIdx.x == 0) {
-    printf("[V2-COMBINE] rank=%d numRemotePes=%d maxChunkNum=%d\n", myPe, numRemotePes, maxChunkNum);
   }
   int totalBids = 0;
   for (int bid = blockId; bid < numRecvBlock * maxChunkNum * numRemotePes;
@@ -1011,7 +1006,6 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
   }
 
   if (threadIdx.x == 0 && blockIdx.x == 0) {
-    printf("[V2-COMBINE] rank=%d chunks done, entering barrier\n", myPe);
   }
   __threadfence_system();
 
@@ -1042,11 +1036,9 @@ __forceinline__ __device__ void CombineInterNodeTyped(EpDispatchCombineArgs<T>& 
     // v2: wait for all remote PEs
     uint64_t* localBarrierPtr = args.crossDeviceBarrierMemObj->template GetAs<uint64_t*>();
     if (laneId == 0) {
-      printf("[V2-BARRIER] rank=%d barrierFlag=%lu expected=%lu\n",
              myPe, barrierFlag, barrierFlag * config.numQpPerPe);
       for (int p = 0; p < npes; p++) {
         if (p / config.gpuPerNode != myNode) {
-          printf("[V2-BARRIER] rank=%d wait pe=%d cur=%lu\n",
                  myPe, p, core::AtomicLoadRelaxedSystem(localBarrierPtr + p));
         }
       }

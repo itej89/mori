@@ -55,7 +55,6 @@ class ProxyThread {
   uint64_t ops_posted_{0};
   uint64_t ops_completed_{0};
   int gpu_id_{0};
-  int first_error_logged_{0};
 };
 
 }  // namespace core

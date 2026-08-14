@@ -79,16 +79,9 @@ void ProxyThread::DrainCq(ProxyQpHandle& qph) {
       if (wc[i].status == IBV_WC_SUCCESS) {
         ring_->cmds[slot].status = PROXY_COMPLETED;
       } else {
-        if (first_error_logged_ < 5) {
-          volatile ProxyCmd* cmd = &ring_->cmds[slot];
-          fprintf(stderr, "proxy: CQE error gpu=%d slot=%u status=%d (%s) wr_id=%lu qpn=%u "
-                  "op=%u qp_idx=%u dst=0x%lx src=0x%lx len=%u rkey=0x%x lkey=0x%x\n",
-                  gpu_id_, slot, wc[i].status, ibv_wc_status_str(wc[i].status), wc[i].wr_id,
-                  qph.qp ? qph.qp->qp_num : 0,
-                  cmd->op, cmd->qp_idx, cmd->dst_addr, cmd->src_addr,
-                  cmd->length, cmd->rkey, cmd->lkey);
-          first_error_logged_++;
-        }
+        fprintf(stderr, "proxy: CQE error slot=%u status=%d (%s) wr_id=%lu ibvQP=%u\n",
+                slot, wc[i].status, ibv_wc_status_str(wc[i].status), wc[i].wr_id,
+                qph.qp ? qph.qp->qp_num : 0);
         ring_->cmds[slot].status = PROXY_ERROR;
       }
       ops_completed_++;
@@ -195,11 +188,6 @@ void ProxyThread::MainLoop() {
 
       wr_qp[batch_count] = qi;
       wrs[batch_count].next = nullptr;
-      if (ops_posted_ < 3) {
-        fprintf(stderr, "[POST-DBG] gpu=%d slot=%u qi=%u op=%u dst=0x%lx src=0x%lx len=%u rkey=0x%x lkey=0x%x\n",
-                gpu_id_, next_slot_ & PROXY_RING_MASK, qi, cmd->op, cmd->dst_addr, cmd->src_addr,
-                cmd->length, cmd->rkey, cmd->lkey);
-      }
       next_slot_++;
       batch_count++;
     }
@@ -265,8 +253,6 @@ void ProxyThread::MainLoop() {
             }
           }
 
-          fprintf(stderr, "proxy: ibv_post_send FATAL gpu=%d ret=%d errno=%d qi=%u qpn=%u\n",
-                  gpu_id_, ret, errno, qi, qph.qp ? qph.qp->qp_num : 0);
           ibv_send_wr* w = to_post;
           while (w) {
             uint32_t slot = static_cast<uint32_t>(w->wr_id) & PROXY_RING_MASK;
