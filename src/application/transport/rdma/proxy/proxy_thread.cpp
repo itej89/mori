@@ -79,9 +79,15 @@ void ProxyThread::DrainCq(ProxyQpHandle& qph) {
       if (wc[i].status == IBV_WC_SUCCESS) {
         ring_->cmds[slot].status = PROXY_COMPLETED;
       } else {
-        fprintf(stderr, "proxy: CQE error slot=%u status=%d (%s) wr_id=%lu ibvQP=%u\n",
-                slot, wc[i].status, ibv_wc_status_str(wc[i].status), wc[i].wr_id,
-                qph.qp ? qph.qp->qp_num : 0);
+        if (wc[i].status != IBV_WC_WR_FLUSH_ERR || first_error_logged_ < 3) {
+          volatile ProxyCmd* cmd = &ring_->cmds[slot];
+          fprintf(stderr, "proxy: CQE error gpu=%d slot=%u status=%d (%s) wr_id=%lu qpn=%u "
+                  "op=%u dst=0x%lx len=%u rkey=0x%x lkey=0x%x\n",
+                  gpu_id_, slot, wc[i].status, ibv_wc_status_str(wc[i].status), wc[i].wr_id,
+                  qph.qp ? qph.qp->qp_num : 0,
+                  cmd->op, cmd->dst_addr, cmd->length, cmd->rkey, cmd->lkey);
+          first_error_logged_++;
+        }
         ring_->cmds[slot].status = PROXY_ERROR;
       }
       ops_completed_++;
