@@ -330,7 +330,7 @@ inline __device__ void DispatchInterNodeLLSend(EpDispatchCombineArgs<T>& args) {
       index_t destTokIdOffset = flagSlotId * warpSize;
       index_t destTokId = destTokIdOffset + laneId;
 
-      size_t remoteIdx = SendBufSlotOffset(config, myNode, destTokId);
+      size_t remoteIdx = SendBufSlotOffset(config, myPe, destTokId);
       if (laneId == 0) {
         index_t tokenNum = std::min(tokenId + warpSize, chunkEndTokenIdx) - tokenId;
         size_t stagingTokOffset = tokenId * xferBytes;
@@ -388,7 +388,7 @@ inline __device__ void DispatchInterNodeRecv(EpDispatchCombineArgs<T>& args) {
 
     // Map i to an actual remote PE, skipping same-node PEs
     int remotePe = (myNode * config.gpuPerNode + config.gpuPerNode + i) % npes;
-    int node = remotePe;  // v2: "node" is actually source PE
+    int node = remotePe;  // v2: source PE for buffer indexing
     int startTokenIdx = k * warpSize;
 
     uint64_t thisChunkTokenNum = 0;

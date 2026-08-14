@@ -326,7 +326,8 @@ void EpDispatchCombineHandle::InitializeShmemBuf() {
   } else if (config.kernelType == KernelType::InterNodeV1 ||
              config.kernelType == KernelType::InterNodeV1LL) {
     auto& bufs = shmemTokBufs.emplace<ShmemBufsInterNodeV1>();
-    // v2: per-PE buffers instead of per-node
+    // v2: per-PE buffers — one slab per source PE in the world.
+    // Requires larger heap (MORI_SHMEM_HEAP_SIZE >= 64G recommended).
     const int nPes = config.worldSize;
     size_t dispatchInpSize = static_cast<ssize_t>(nPes) * config.MaxNumTokensToSendPerRank() *
                              config.MaxXferBytesPerToken();
