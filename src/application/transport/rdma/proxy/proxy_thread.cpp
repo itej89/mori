@@ -123,7 +123,7 @@ bool ProxyThread::BuildWr(volatile ProxyCmd* cmd, ProxyQpHandle& qph,
       wr.opcode = IBV_WR_RDMA_WRITE;
       wr.send_flags |= IBV_SEND_INLINE;
       wr.wr.rdma.remote_addr = cmd->dst_addr;
-      wr.wr.rdma.rkey = (qph.rkey_override != 0) ? qph.rkey_override : cmd->rkey;
+      wr.wr.rdma.rkey = cmd->rkey;  // signal targets non-heap MR, don't use heap rkey override
       break;
     }
     case PROXY_ATOMIC_FETCH_ADD:
