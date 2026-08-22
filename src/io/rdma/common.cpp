@@ -21,6 +21,7 @@
 // SOFTWARE.
 #include "src/io/rdma/common.hpp"
 
+#include <arpa/inet.h>
 #include <infiniband/verbs.h>  // dereferences ibvHandle.qp (forward-declared in core)
 #include <linux/futex.h>
 #include <sys/syscall.h>
@@ -971,6 +972,12 @@ RdmaOpRet RdmaBatchReadWrite(const EpPairVec& eps,
                                          static_cast<uint64_t>(id), isRead,
                                          static_cast<uint64_t>(epBytesSinceSignal[epId]));
       }
+    }
+
+    if (control.useWriteImm && !isRead && isLastBatchForEp &&
+        static_cast<size_t>(epId) < control.perEpImmData.size()) {
+      last.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
+      last.imm_data = htonl(control.perEpImmData[epId]);
     }
 
     struct ibv_send_wr* badWr = nullptr;

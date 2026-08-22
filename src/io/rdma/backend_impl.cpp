@@ -21,6 +21,7 @@
 // SOFTWARE.
 #include "src/io/rdma/backend_impl.hpp"
 
+#include <arpa/inet.h>
 #include <infiniband/verbs.h>  // dereferences ibvHandle.qp/cq/compCh (forward-declared in core)
 #include <sys/epoll.h>
 
@@ -839,6 +840,44 @@ NotifManager::FlushDrainStats NotifManager::ProcessOneCqe(
         wr.num_sge = 1;
         struct ibv_recv_wr* bad = nullptr;
         SYSCALL_RETURN_ZERO(ibv_post_recv(ep.local.ibvHandle.qp, &wr, &bad));
+      } else if (wc[i].opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
+        if (!config.enableNotification) {
+          MORI_IO_WARN("Received unexpected RECV_RDMA_WITH_IMM when notification is disabled");
+          continue;
+        }
+
+        uint16_t seq;
+        int qpIndex, totalNum;
+        UnpackWriteImmediate(ntohl(wc[i].imm_data), seq, qpIndex, totalNum);
+        TransferUniqueId id = ResolveImmSeq(seq);
+
+        {
+          std::lock_guard<std::mutex> lock(mu);
+          EngineKey ekey = ep.remoteEngineKey;
+          if (notifPool[ekey].find(id) == notifPool[ekey].end()) {
+            notifPool[ekey][id] = totalNum;
+          }
+          notifPool[ekey][id] -= 1;
+          MORI_IO_TRACE(
+              "NotifManager receive write-imm notif from engine {} id {} qp {} total {} cur {}",
+              ekey.c_str(), id, qpIndex, totalNum, notifPool[ekey][id]);
+        }
+
+        // Replenish recv WR (write-with-imm consumes one)
+        assert(notifCtxPtr != nullptr);
+        QpNotifContext& ctx = *notifCtxPtr;
+        uint64_t idx = wc[i].wr_id;
+        struct ibv_sge sge{};
+        sge.addr = ctx.mr.addr + idx * sizeof(NotifMessage);
+        sge.length = sizeof(NotifMessage);
+        sge.lkey = ctx.mr.lkey;
+
+        struct ibv_recv_wr wr{};
+        wr.wr_id = idx;
+        wr.sg_list = &sge;
+        wr.num_sge = 1;
+        struct ibv_recv_wr* bad = nullptr;
+        SYSCALL_RETURN_ZERO(ibv_post_recv(ep.local.ibvHandle.qp, &wr, &bad));
       } else if (wc[i].opcode == IBV_WC_SEND) {
         if (!IsNotifSendWrId(wc[i].wr_id)) {
           MORI_IO_WARN(
@@ -982,6 +1021,25 @@ bool NotifManager::PopInboundTransferStatus(const EngineKey& remote, TransferUni
     }
   }
   return false;
+}
+
+uint16_t NotifManager::AllocImmSeq(TransferUniqueId id) {
+  uint16_t seq = immNextSeq_.fetch_add(1, std::memory_order_relaxed);
+  std::lock_guard<std::mutex> lock(mu);
+  immSeqToId_[seq] = id;
+  return seq;
+}
+
+TransferUniqueId NotifManager::ResolveImmSeq(uint16_t seq) {
+  std::lock_guard<std::mutex> lock(mu);
+  auto it = immSeqToId_.find(seq);
+  if (it == immSeqToId_.end()) {
+    MORI_IO_ERROR("ResolveImmSeq: unknown seq {}", seq);
+    return 0;
+  }
+  TransferUniqueId id = it->second;
+  immSeqToId_.erase(it);
+  return id;
 }
 
 void NotifManager::Start() {
@@ -1332,13 +1390,15 @@ RdmaBackendSession::RdmaBackendSession(const RdmaBackendConfig& config,
                                        std::vector<application::RdmaMemoryRegion> localMrPerEp,
                                        std::vector<application::RdmaMemoryRegion> remoteMrPerEp,
                                        const EpPairVec& e, Executor* exec,
-                                       MemoryLocationType localLoc)
+                                       MemoryLocationType localLoc,
+                                       NotifManager* notifMgr)
     : config(config),
       localMrPerEp(std::move(localMrPerEp)),
       remoteMrPerEp(std::move(remoteMrPerEp)),
       eps(e),
       executor(exec),
-      localLoc_(localLoc) {}
+      localLoc_(localLoc),
+      notifMgr_(notifMgr) {}
 
 void RdmaBackendSession::ReadWrite(size_t localOffset, size_t remoteOffset, size_t size,
                                    TransferStatus* status, TransferUniqueId id, bool isRead) {
@@ -1347,16 +1407,31 @@ void RdmaBackendSession::ReadWrite(size_t localOffset, size_t remoteOffset, size
   auto callbackMeta = std::make_shared<CqCallbackMeta>(status, id, 1);
   internal::PublishCurrentIoCallDiagnostics(callbackMeta);
 
+  const bool useImm = config.enableNotification && !isRead && notifMgr_ != nullptr;
+
+  RdmaTransferControl control{};
+  control.chunkBytes = config.enableTransferChunking ? config.chunkBytes : 0;
+  control.maxChunks = config.maxChunksPerTransfer;
+  control.creditByWrCount = config.enableTransferChunking;
+
+  if (useImm) {
+    int totalNum = static_cast<int>(eps.size());
+    uint16_t seq = notifMgr_->AllocImmSeq(id);
+    control.useWriteImm = true;
+    control.perEpImmData.resize(eps.size());
+    for (size_t e = 0; e < eps.size(); ++e) {
+      control.perEpImmData[e] = PackWriteImmediate(seq, static_cast<int>(e), totalNum);
+    }
+  }
+
   RdmaOpRet ret = RdmaBatchReadWrite(eps, localMrPerEp, remoteMrPerEp, {localOffset},
-                                     {remoteOffset}, {size}, callbackMeta, id, isRead, 1,
-                                     config.enableTransferChunking ? config.chunkBytes : 0,
-                                     config.maxChunksPerTransfer, config.enableTransferChunking);
+                                     {remoteOffset}, {size}, callbackMeta, id, isRead, 1, control);
 
   assert(!ret.Init());
   if (ret.Failed() || ret.Succeeded()) {
     status->Update(ret.code, ret.message);
   }
-  if (!ret.Failed() && config.enableNotification) {
+  if (!ret.Failed() && config.enableNotification && !useImm) {
     RdmaOpRet notifRet = RdmaNotifyTransfer(eps, status, id);
     if (notifRet.Failed()) {
       status->Update(notifRet.code, notifRet.message);
@@ -1415,6 +1490,7 @@ void RdmaBackendSession::BatchReadWrite(const SizeVec& localOffsets, const SizeV
   auto callbackMeta = std::make_shared<CqCallbackMeta>(status, id, totalCredit);
   internal::PublishCurrentIoCallDiagnostics(callbackMeta);
   RdmaOpRet ret;
+  bool usedWriteImm = false;
   if (canUseWorkerChunking) {
     ExecutorReq req{eps,
                     localMrPerEp.front(),
@@ -1448,6 +1524,16 @@ void RdmaBackendSession::BatchReadWrite(const SizeVec& localOffsets, const SizeV
     control.chunkBytes = chunk ? config.chunkBytes : 0;
     control.maxChunks = config.maxChunksPerTransfer;
     control.creditByWrCount = chunk;
+    if (config.enableNotification && !isRead && notifMgr_ != nullptr) {
+      int totalNum = static_cast<int>(eps.size());
+      uint16_t seq = notifMgr_->AllocImmSeq(id);
+      control.useWriteImm = true;
+      usedWriteImm = true;
+      control.perEpImmData.resize(eps.size());
+      for (size_t e = 0; e < eps.size(); ++e) {
+        control.perEpImmData[e] = PackWriteImmediate(seq, static_cast<int>(e), totalNum);
+      }
+    }
     ret = RdmaBatchReadWrite(eps, localMrPerEp, remoteMrPerEp, localOffsets, remoteOffsets, sizes,
                              callbackMeta, id, isRead, config.postBatchSize, control);
   }
@@ -1455,7 +1541,7 @@ void RdmaBackendSession::BatchReadWrite(const SizeVec& localOffsets, const SizeV
   if (ret.Failed() || ret.Succeeded()) {
     status->Update(ret.code, ret.message);
   }
-  if (!ret.Failed() && config.enableNotification) {
+  if (!ret.Failed() && config.enableNotification && !usedWriteImm) {
     RdmaOpRet notifRet = RdmaNotifyTransfer(eps, status, id);
     if (notifRet.Failed()) {
       status->Update(notifRet.code, notifRet.message);
@@ -1705,7 +1791,7 @@ void RdmaBackend::CreateSession(const MemoryDesc& local, const MemoryDesc& remot
   }
 
   sess = RdmaBackendSession(config, std::move(localMrPerEp), std::move(remoteMrPerEp), epSet,
-                            executor.get(), local.loc);
+                            executor.get(), local.loc, notif.get());
 }
 
 bool RdmaBackend::PopInboundTransferStatus(EngineKey remote, TransferUniqueId id,

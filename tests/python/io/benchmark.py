@@ -313,6 +313,11 @@ def parse_args():
         choices=["trace", "debug", "info", "warning", "error", "critical"],
         help="Log level options: 'trace', 'debug', 'info', 'warning', 'error', 'critical'",
     )
+    parser.add_argument(
+        "--enable-notification",
+        action="store_true",
+        help="Enable RDMA notification after each transfer (default: disabled)",
+    )
 
     args = parser.parse_args()
     return args
@@ -363,6 +368,7 @@ class MoriIoBenchmark:
         num_streams: int = 64,
         num_events: int = 64,
         xgmi_multiprocess: bool = False,
+        enable_notification: bool = False,
     ):
         self.op_type = op_type
         self.buffer_size = buffer_size
@@ -405,6 +411,7 @@ class MoriIoBenchmark:
         self.num_streams = num_streams
         self.num_events = num_events
         self.xgmi_multiprocess = xgmi_multiprocess
+        self.enable_notification = enable_notification
 
         if self.sweep:
             if self.sweep_start_size <= 0 or self.sweep_max_size <= 0:
@@ -784,7 +791,7 @@ class MoriIoBenchmark:
             post_batch_size=-1,
             num_worker_threads=self.num_worker_threads,
             poll_cq_mode=self.poll_cq_mode,
-            enable_notification=False,
+            enable_notification=self.enable_notification,
             enable_transfer_chunking=self.enable_chunking,
             chunk_bytes=self.chunk_bytes,
             max_chunks_per_transfer=self.max_chunks,
@@ -1358,6 +1365,7 @@ def benchmark_engine(local_rank, node_rank, args):
         target_mem_type=args.target_mem_type,
         num_streams=args.num_streams,
         num_events=args.num_events,
+        enable_notification=args.enable_notification,
     )
     bench.print_config()
     bench.run()
