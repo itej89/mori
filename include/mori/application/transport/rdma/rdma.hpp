@@ -201,6 +201,9 @@ bool ReadIoTrafficClassDisableEnv();
 bool ReadIbEnableRelaxedOrderingEnv();
 int MaybeAddRelaxedOrderingFlag(int accessFlag);
 
+ibv_mr* RegMrWithDmabufFallback(ibv_pd* pd, void* addr, size_t size,
+                                int access_flags, bool onGpu);
+
 /* -------------------------------------------------------------------------- */
 /*                              RdmaDeviceContext                             */
 /* -------------------------------------------------------------------------- */

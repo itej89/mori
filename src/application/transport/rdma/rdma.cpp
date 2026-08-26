@@ -470,6 +470,28 @@ static int TryExportDmabufFd(void* ptr, size_t size, uint64_t* offset) {
   return fd;
 }
 
+ibv_mr* RegMrWithDmabufFallback(ibv_pd* pd, void* addr, size_t size,
+                                int access_flags, bool onGpu) {
+  if (onGpu) {
+    uint64_t dmabufOffset = 0;
+    int dmabufFd = TryExportDmabufFd(addr, size, &dmabufOffset);
+    if (dmabufFd >= 0) {
+      ibv_mr* mr = ibv_reg_dmabuf_mr(pd, dmabufOffset, size,
+                                      reinterpret_cast<uint64_t>(addr),
+                                      dmabufFd, access_flags);
+      close(dmabufFd);
+      if (mr) {
+        fprintf(stderr, "[MORI] RegMrWithDmabufFallback: dmabuf succeeded (addr=%p, size=%zu)\n",
+                addr, size);
+        return mr;
+      }
+      fprintf(stderr, "[MORI] RegMrWithDmabufFallback: ibv_reg_dmabuf_mr failed (errno=%d: %s), "
+              "falling back to ibv_reg_mr\n", errno, strerror(errno));
+    }
+  }
+  return ibv_reg_mr(pd, addr, size, access_flags);
+}
+
 application::RdmaMemoryRegion RdmaDeviceContext::RegisterRdmaMemoryRegionAuto(void* ptr,
                                                                               size_t size,
                                                                               int accessFlag) {

@@ -316,7 +316,8 @@ IonicQpContainer::IonicQpContainer(ibv_context* context, const RdmaEndpointConfi
   int atomicIbufAccessFlag =
       MaybeAddRelaxedOrderingFlag(IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                                   IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
-  atomicIbufMr = ibv_reg_mr(pd_uxdma, atomicIbufAddr, atomicIbufSize, atomicIbufAccessFlag);
+  atomicIbufMr = RegMrWithDmabufFallback(pd_uxdma, atomicIbufAddr, atomicIbufSize,
+                                          atomicIbufAccessFlag, config.onGpu);
   assert(atomicIbufMr);
 
   MORI_APP_TRACE(
