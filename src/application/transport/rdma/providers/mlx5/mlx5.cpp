@@ -275,8 +275,8 @@ void Mlx5QpContainer::CreateQueuePair(uint32_t cqn, uint32_t pdn) {
   int atomicIbufAccessFlag =
       MaybeAddRelaxedOrderingFlag(IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                                   IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
-  atomicIbufMr = RegMrWithDmabufFallback(device_context->GetIbvPd(), atomicIbufAddr,
-                                          atomicIbufSize, atomicIbufAccessFlag, config.onGpu);
+  atomicIbufMr =
+      ibv_reg_mr(device_context->GetIbvPd(), atomicIbufAddr, atomicIbufSize, atomicIbufAccessFlag);
   assert(atomicIbufMr);
 
   MORI_APP_TRACE(

@@ -296,8 +296,7 @@ BnxtQpContainer::BnxtQpContainer(ibv_context* context, const RdmaEndpointConfig&
   int atomicIbufAccessFlag =
       MaybeAddRelaxedOrderingFlag(IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
                                   IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC);
-  atomicIbufMr = RegMrWithDmabufFallback(pd, atomicIbufAddr, atomicIbufSize,
-                                          atomicIbufAccessFlag, config.onGpu);
+  atomicIbufMr = ibv_reg_mr(pd, atomicIbufAddr, atomicIbufSize, atomicIbufAccessFlag);
   assert(atomicIbufMr);
 
   MORI_APP_TRACE(
