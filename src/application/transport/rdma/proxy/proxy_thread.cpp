@@ -71,6 +71,7 @@ void ProxyThread::DrainCq(ProxyQpHandle& qph) {
           if (recv_idx < qph.recv_count && qph.recv_buf) {
             struct { uint64_t addr; uint64_t val; } payload;
             memcpy(&payload, reinterpret_cast<char*>(qph.recv_buf) + recv_idx * 64, 16);
+            if (payload.addr == 0) continue;
             volatile uint64_t* target = reinterpret_cast<volatile uint64_t*>(payload.addr);
             __atomic_fetch_add(target, payload.val, __ATOMIC_SEQ_CST);
             asm volatile("clflush (%0)" :: "r"(target) : "memory");
