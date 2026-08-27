@@ -33,6 +33,7 @@
 #include <utility>
 
 #include "mori/application/utils/check.hpp"
+#include "mori/application/utils/math.hpp"
 #include "mori/utils/mori_log.hpp"
 namespace mori {
 namespace application {
@@ -250,6 +251,23 @@ RdmaEndpoint IBVerbsDeviceContext::CreateRdmaEndpoint(const RdmaEndpointConfig& 
   if (config.enableSrq)
     assert(endpoint.ibvHandle.srq && (endpoint.ibvHandle.qp->srq == endpoint.ibvHandle.srq));
 
+  // Allocate atomic internal buffer (ibuf) for proxy SEND_WITH_IMM emulation
+  if (config.atomicIbufSlots > 0) {
+    size_t ibufSlots = RoundUpPowOfTwo(config.atomicIbufSlots);
+    size_t ibufSize = (ibufSlots + 1) * ATOMIC_IBUF_SLOT_SIZE;
+    void* ibufAddr = nullptr;
+    int ae = posix_memalign(&ibufAddr, 4096, ibufSize);
+    assert(ae == 0 && ibufAddr);
+    memset(ibufAddr, 0, ibufSize);
+    ibv_mr* ibufMr = ibv_reg_mr(pd, ibufAddr, ibufSize,
+        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ);
+    assert(ibufMr);
+    endpoint.atomicIbuf.addr = reinterpret_cast<uintptr_t>(ibufAddr);
+    endpoint.atomicIbuf.lkey = ibufMr->lkey;
+    endpoint.atomicIbuf.rkey = ibufMr->rkey;
+    endpoint.atomicIbuf.nslots = ibufSlots;
+  }
+
   {
     std::lock_guard<std::mutex> lock(poolMu);
     cqPool.insert({endpoint.ibvHandle.cq, endpoint.ibvHandle.cq});
@@ -381,6 +399,41 @@ void IBVerbsDeviceContext::ConnectEndpoint(const RdmaEndpointHandle& local,
   flags = IBV_QP_STATE | IBV_QP_SQ_PSN | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY |
           IBV_QP_MAX_QP_RD_ATOMIC;
   ModifyOrThrow("RTS", attr, flags);
+
+  // Post recv WRs for SEND_WITH_IMM barrier atomic emulation (proxy path)
+  constexpr int kRecvCount = 512;
+  constexpr size_t kRecvBufSz = kRecvCount * 64;
+  void* rbuf = nullptr;
+  int re = posix_memalign(&rbuf, 4096, kRecvBufSz);
+  if (re == 0 && rbuf) {
+    memset(rbuf, 0, kRecvBufSz);
+    ibv_mr* rmr = ibv_reg_mr(pd, rbuf, kRecvBufSz,
+        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+    if (rmr) {
+      for (int r = 0; r < kRecvCount; r++) {
+        ibv_sge rsge{};
+        rsge.addr = reinterpret_cast<uintptr_t>(rbuf) + r * 64;
+        rsge.length = 64;
+        rsge.lkey = rmr->lkey;
+        ibv_recv_wr rwr{}, *rbad = nullptr;
+        rwr.wr_id = r;
+        rwr.sg_list = &rsge;
+        rwr.num_sge = 1;
+        ibv_post_recv(qp, &rwr, &rbad);
+      }
+      {
+        std::lock_guard<std::mutex> lock(poolMu);
+        proxyRecvInfo[local.qpn] = {rbuf, rmr->lkey, static_cast<uint32_t>(kRecvCount)};
+      }
+    }
+  }
+}
+
+IBVerbsDeviceContext::ProxyRecvInfo IBVerbsDeviceContext::GetProxyRecvInfo(uint32_t qpn) const {
+  std::lock_guard<std::mutex> lock(poolMu);
+  auto it = proxyRecvInfo.find(qpn);
+  if (it != proxyRecvInfo.end()) return it->second;
+  return {nullptr, 0, 0};
 }
 
 bool IBVerbsDeviceContext::DestroyRdmaEndpointNoThrow(const RdmaEndpoint& ep) noexcept {
