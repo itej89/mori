@@ -400,7 +400,9 @@ void IBVerbsDeviceContext::ConnectEndpoint(const RdmaEndpointHandle& local,
           IBV_QP_MAX_QP_RD_ATOMIC;
   ModifyOrThrow("RTS", attr, flags);
 
-  // Post recv WRs for SEND_WITH_IMM barrier atomic emulation (proxy path)
+  // Allocate recv buffer for SEND_WITH_IMM barrier atomic emulation.
+  // The actual ibv_post_recv is done in ProxyThread::Init so that
+  // replenishment and consumption live in the same object.
   constexpr int kRecvCount = 512;
   constexpr size_t kRecvBufSz = kRecvCount * 64;
   void* rbuf = nullptr;
@@ -410,21 +412,8 @@ void IBVerbsDeviceContext::ConnectEndpoint(const RdmaEndpointHandle& local,
     ibv_mr* rmr = ibv_reg_mr(pd, rbuf, kRecvBufSz,
         IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
     if (rmr) {
-      for (int r = 0; r < kRecvCount; r++) {
-        ibv_sge rsge{};
-        rsge.addr = reinterpret_cast<uintptr_t>(rbuf) + r * 64;
-        rsge.length = 64;
-        rsge.lkey = rmr->lkey;
-        ibv_recv_wr rwr{}, *rbad = nullptr;
-        rwr.wr_id = r;
-        rwr.sg_list = &rsge;
-        rwr.num_sge = 1;
-        ibv_post_recv(qp, &rwr, &rbad);
-      }
-      {
-        std::lock_guard<std::mutex> lock(poolMu);
-        proxyRecvInfo[local.qpn] = {rbuf, rmr->lkey, static_cast<uint32_t>(kRecvCount)};
-      }
+      std::lock_guard<std::mutex> lock(poolMu);
+      proxyRecvInfo[local.qpn] = {rbuf, rmr->lkey, static_cast<uint32_t>(kRecvCount)};
     }
   }
 }
