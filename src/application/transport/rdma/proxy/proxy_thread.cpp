@@ -114,7 +114,14 @@ void ProxyThread::DrainCq(ProxyQpHandle& qph) {
         continue;
       }
       uint32_t slot = static_cast<uint32_t>(wc[i].wr_id) & PROXY_RING_MASK;
-      if (ring_->cmds[slot].op == PROXY_ATOMIC_FETCH_ADD && qph.use_native_atomics) {
+      if (ring_->cmds[slot].flags != PROXY_FLAGS_DEFAULT && !qph.use_native_atomics) {
+        MORI_APP_ERROR("proxy: op={} requires native atomics but NIC does not support them",
+                       ring_->cmds[slot].op);
+        ring_->cmds[slot].status = PROXY_ERROR;
+        ops_completed_++;
+        continue;
+      }
+      if (ring_->cmds[slot].flags == PROXY_FLAGS_FETCH_REQUIRED && qph.use_native_atomics) {
         ring_->cmds[slot].result = *reinterpret_cast<volatile uint64_t*>(ring_->cmds[slot].src_addr);
       }
       ring_->cmds[slot].status = PROXY_COMPLETED;

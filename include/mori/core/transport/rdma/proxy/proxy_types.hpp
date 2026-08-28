@@ -21,6 +21,11 @@ enum ProxyInlineTag : uint32_t {
   PROXY_INLINE_SCALAR_WRITE = 1,
 };
 
+enum ProxyCmdFlags : uint32_t {
+  PROXY_FLAGS_DEFAULT = 0,
+  PROXY_FLAGS_FETCH_REQUIRED = 1,
+};
+
 enum ProxyCmdStatus : uint32_t {
   PROXY_FREE = 0,
   PROXY_PENDING = 1,

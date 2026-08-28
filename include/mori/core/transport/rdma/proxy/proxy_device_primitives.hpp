@@ -107,7 +107,7 @@ inline __device__ uint32_t ProxyPostAtomicNonFetch(
   ring->cmds[slot].lkey = lkey;
   ring->cmds[slot].rkey = rkey;
   ring->cmds[slot].atomic_arg = add_value;
-  ring->cmds[slot].flags = 1;
+  ring->cmds[slot].flags = PROXY_FLAGS_DEFAULT;
 
   __threadfence_system();
   ring->cmds[slot].status = PROXY_PENDING;
@@ -158,13 +158,14 @@ inline __device__ uint64_t ProxyPostAtomicFetch(
   ring->cmds[slot].lkey = lkey;
   ring->cmds[slot].rkey = rkey;
   ring->cmds[slot].atomic_arg = add_value;
-  ring->cmds[slot].flags = 1;
+  ring->cmds[slot].flags = PROXY_FLAGS_FETCH_REQUIRED;
   ring->cmds[slot].result = 0;
 
   __threadfence_system();
   ring->cmds[slot].status = PROXY_PENDING;
 
   ProxyWaitSlotCompleted(ring, slot);
+  assert(ring->cmds[slot].status != PROXY_ERROR);
   return ring->cmds[slot].result;
 }
 
