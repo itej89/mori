@@ -83,6 +83,8 @@ struct alignas(128) ProxyCmd {
 
 static_assert(sizeof(ProxyCmd) == 128, "ProxyCmd must be 128 bytes");
 
+static constexpr uint64_t PROXY_WRID_INTERNAL = 1ull << 63;
+
 static constexpr uint32_t PROXY_RING_SIZE = 65536;
 static constexpr uint32_t PROXY_RING_MASK = PROXY_RING_SIZE - 1;
 static constexpr int PROXY_MAX_NICS = 8;
