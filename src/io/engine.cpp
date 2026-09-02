@@ -39,6 +39,7 @@
 #include "mori/utils/host_utils.hpp"
 #include "src/io/call_diagnostics_internal.hpp"
 #include "src/io/fabric/backend_impl.hpp"
+#include "mori/utils/hip_compat.hpp"
 #include "src/io/rdma/backend_impl.hpp"
 #include "src/io/roctx_mori.hpp"  // ADDITIVE: MORI_ROCTX-gated host-send roctx markers
 #include "src/io/xgmi/backend_impl.hpp"
@@ -252,6 +253,7 @@ void IOEngine::CreateBackend(BackendType type, const BackendConfig& beConfig) {
     backends.insert({type, std::move(backend)});
     InvalidateRouteCache();
     EnsureXgmiBackendCreatedIfSupported();
+    EnsureFabricBackendCreatedIfSupported();
   } else if (type == BackendType::XGMI) {
     auto backend = std::make_unique<XgmiBackend>(desc.key, config,
                                                  static_cast<const XgmiBackendConfig&>(beConfig));
@@ -336,6 +338,56 @@ void IOEngine::EnsureXgmiBackendCreatedIfSupported() {
     MORI_IO_WARN("Auto-create XGMI backend failed: {}", e.what());
   } catch (...) {
     MORI_IO_WARN("Auto-create XGMI backend failed due to unknown error");
+  }
+}
+
+bool IOEngine::SupportsFabricBackend() const {
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleType = hipMemHandleTypeFabricCompat;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = 0;
+
+  size_t gran = 0;
+  hipError_t err =
+      hipMemGetAllocationGranularity(&gran, &prop, hipMemAllocationGranularityRecommended);
+  if (err != hipSuccess || gran == 0) {
+    (void)hipGetLastError();
+    return false;
+  }
+  hipMemGenericAllocationHandle_t handle{};
+  err = hipMemCreate(&handle, gran, &prop, 0);
+  if (err != hipSuccess) {
+    (void)hipGetLastError();
+    return false;
+  }
+  hipMemFabricHandle_compat_t fh;
+  err = hipMemExportToShareableHandle(&fh, handle, hipMemHandleTypeFabricCompat, 0);
+  (void)hipMemRelease(handle);
+  if (err != hipSuccess) {
+    (void)hipGetLastError();
+    return false;
+  }
+  return true;
+}
+
+void IOEngine::EnsureFabricBackendCreatedIfSupported() {
+  if (backends.find(BackendType::FABRIC) != backends.end()) {
+    return;
+  }
+  if (!SupportsFabricBackend()) {
+    return;
+  }
+  try {
+    FabricBackendConfig fabricConfig{};
+    auto backend = std::make_unique<FabricBackend>(desc.key, config, fabricConfig);
+    backends.insert({BackendType::FABRIC, std::move(backend)});
+    InvalidateRouteCache();
+    MORI_IO_INFO("Auto-created FABRIC backend after RDMA initialization");
+  } catch (const std::exception& e) {
+    MORI_IO_WARN("Auto-create FABRIC backend failed: {}", e.what());
+  } catch (...) {
+    MORI_IO_WARN("Auto-create FABRIC backend failed due to unknown error");
   }
 }
 

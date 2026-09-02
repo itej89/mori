@@ -151,7 +151,9 @@ class IOEngine {
 
   Backend* SelectBackend(const MemoryDesc& local, const MemoryDesc& remote);
   bool SupportsXgmiBackendByP2P() const;
+  bool SupportsFabricBackend() const;
   void EnsureXgmiBackendCreatedIfSupported();
+  void EnsureFabricBackendCreatedIfSupported();
   void InvalidateRouteCache();
   void UpdateRouteCache(const RouteCacheKey& key, BackendType backendType);
   std::optional<BackendType> QueryRouteCache(const RouteCacheKey& key) const;
